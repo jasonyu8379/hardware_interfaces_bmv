@@ -11,8 +11,8 @@
 #include "helpers.hpp"
 
 #include <cmath>
-#include <vector>
 #include <opencv2/imgproc.hpp>
+#include <vector>
 
 // Key code for 'a' (use 'a' lowercase)
 #define KEY_CODE_A 30
@@ -587,11 +587,7 @@ void ManipServer::wrench_loop(const RUT::TimePoint& time0, int publish_rate,
       time_now_ms = timer.toc_ms();
       {
         std::lock_guard<std::mutex> lock(_wrench_filtered_buffer_mtxs[id]);
-        if (num_ft_sensors == 1) {
-          wrench_fb_filtered = _wrench_filters[id].step(wrench_fb);
-        } else {
-          wrench_fb_filtered = wrench_fb;
-        }
+        wrench_fb_filtered = _wrench_filters[id].step(wrench_fb);
         _wrench_filtered_buffers[id].put(wrench_fb_filtered);
         _wrench_filtered_timestamp_ms_buffers[id].put(time_now_ms);
       }
@@ -615,11 +611,7 @@ void ManipServer::wrench_loop(const RUT::TimePoint& time0, int publish_rate,
       wrench_fb_filtered.setZero();
       {
         std::lock_guard<std::mutex> lock(_wrench_filtered_buffer_mtxs[id]);
-        if (num_ft_sensors == 1) {
-          wrench_fb_filtered = _wrench_filters[id].step(wrench_fb);
-        } else {
-          wrench_fb_filtered = wrench_fb;
-        }
+        wrench_fb_filtered = _wrench_filters[id].step(wrench_fb);
         _wrench_filtered_buffers[id].put(wrench_fb_filtered);
         _wrench_filtered_timestamp_ms_buffers[id].put(time_now_ms);
       }
@@ -703,24 +695,26 @@ void ManipServer::rgb_loop(const RUT::TimePoint& time0, int id) {
         usleep(20 * 1000);  // 20ms, 50hz
       }
       _color_mats[id] = raw;
-      time_now_ms     = timer.toc_ms();
+      time_now_ms = timer.toc_ms();
     }
 
     // === resize → center‐crop ===
     int iw = raw.cols, ih = raw.rows;
     int rw, rh;
     int interp = cv::INTER_AREA;
-    if (float(iw)/ih >= float(ow)/oh) {
+    if (float(iw) / ih >= float(ow) / oh) {
       rh = oh;
-      rw = int(std::ceil(float(rh)/ih * iw));
-      if (oh > ih) interp = cv::INTER_LINEAR;
+      rw = int(std::ceil(float(rh) / ih * iw));
+      if (oh > ih)
+        interp = cv::INTER_LINEAR;
     } else {
       rw = ow;
-      rh = int(std::ceil(float(rw)/iw * ih));
-      if (ow > iw) interp = cv::INTER_LINEAR;
+      rh = int(std::ceil(float(rw) / iw * ih));
+      if (ow > iw)
+        interp = cv::INTER_LINEAR;
     }
     cv::resize(raw, tmp, cv::Size(rw, rh), 0.0, 0.0, interp);
-    int x0 = (rw - ow)/2, y0 = (rh - oh)/2;
+    int x0 = (rw - ow) / 2, y0 = (rh - oh) / 2;
     resized_color_mat = tmp(cv::Rect(x0, y0, ow, oh)).clone();
 
     // // === DEBUG save first 20 frames ===

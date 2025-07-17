@@ -101,7 +101,7 @@ bool ManipServer::initialize(const std::string& config_path) {
                       << ". Exiting." << std::endl;
             return false;
           }
-        } 
+        }
         // else if (_config.camera_selection == CameraSelection::REALSENSE) {
         //   Realsense::RealsenseConfig realsense_config;
         //   try {
@@ -120,7 +120,7 @@ bool ManipServer::initialize(const std::string& config_path) {
         //               << ". Exiting." << std::endl;
         //     return false;
         //   }
-        // } 
+        // }
         else if (_config.camera_selection == CameraSelection::OAK) {
           OAK::OAKConfig oak_config;
           try {
@@ -184,7 +184,7 @@ bool ManipServer::initialize(const std::string& config_path) {
             return false;
           }
           wrench_publish_rate.push_back(robotiq_config.publish_rate);
-        } 
+        }
         // else if (_config.force_sensing_mode ==
         //            ForceSensingMode::FORCE_MODE_COINFT) {
         //   CoinFT::CoinFTConfig coinft_config;
@@ -206,7 +206,7 @@ bool ManipServer::initialize(const std::string& config_path) {
         //   // CoinFT is blocking and don't need a timed loop.
         //   // so the loop rate in manipserver can be anything faster than 360hz
         //   wrench_publish_rate.push_back(1000);
-        // } 
+        // }
         else {
           std::cerr << "Invalid force sensing mode. Exiting." << std::endl;
           return false;
@@ -223,11 +223,17 @@ bool ManipServer::initialize(const std::string& config_path) {
 
   // initialize wrench filter
   std::cout << "[ManipServer] Initializing wrench filters.\n";
+
   for (int id : _id_list) {
+    int num_ft_sensors = 1;
+    if (!_config.mock_hardware) {
+      num_ft_sensors = force_sensor_ptrs[id]->getNumSensors();
+    }
     // same parameter for all filters
     _wrench_filters.emplace_back(_config.wrench_filter_parameters[0],
                                  _config.wrench_filter_parameters[1],
-                                 _config.wrench_filter_parameters[2], 6);
+                                 _config.wrench_filter_parameters[2],
+                                 6 * num_ft_sensors);
   }
 
   // initialize Admittance controller and perturbation generator
