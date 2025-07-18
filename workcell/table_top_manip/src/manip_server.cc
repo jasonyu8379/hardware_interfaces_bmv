@@ -212,12 +212,26 @@ bool ManipServer::initialize(const std::string& config_path) {
           return false;
         }
         std::cout << "[ManipServer] Force sensor " << id << " initialized.\n";
+        _num_ft_sensors.push_back(force_sensor_ptrs[id]->getNumSensors());
       }
     }
   } else {
     // mock hardware
     for (int id : _id_list) {
-      wrench_publish_rate.push_back(7000);
+      wrench_publish_rate.push_back(500);
+      // still need to read _num_ft_sensors from config
+      if (_config.force_sensing_mode == ForceSensingMode::FORCE_MODE_ATI) {
+        _num_ft_sensors.push_back(1);
+      } else if (_config.force_sensing_mode ==
+                 ForceSensingMode::FORCE_MODE_ROBOTIQ) {
+        _num_ft_sensors.push_back(1);
+      } else if (_config.force_sensing_mode ==
+                 ForceSensingMode::FORCE_MODE_COINFT) {
+        _num_ft_sensors.push_back(2);
+      } else {
+        std::cerr << "Invalid force sensing mode. Exiting." << std::endl;
+        return false;
+      }
     }
   }
 
@@ -323,10 +337,6 @@ bool ManipServer::initialize(const std::string& config_path) {
       _states_wrench_thread_saving.push_back(false);
       _states_wrench_seq_id.push_back(0);
 
-      int num_ft_sensors = 1;
-      if (!_config.mock_hardware)
-        num_ft_sensors = force_sensor_ptrs[id]->getNumSensors();
-
       _wrench_buffers.push_back(RUT::DataBuffer<Eigen::VectorXd>());
       _wrench_filtered_buffers.push_back(RUT::DataBuffer<Eigen::VectorXd>());
 
@@ -335,7 +345,7 @@ bool ManipServer::initialize(const std::string& config_path) {
           RUT::DataBuffer<double>());
 
       _wrench_buffers[id].initialize(_config.wrench_buffer_size,
-                                     6 * num_ft_sensors, 1,
+                                     6 * _num_ft_sensors[id], 1,
                                      "wrench" + std::to_string(id));
       _wrench_filtered_buffers[id].initialize(
           _config.wrench_buffer_size, 6, 1,
@@ -450,7 +460,7 @@ bool ManipServer::initialize(const std::string& config_path) {
     _poses_fb_mtxs.emplace_back();
     _perturbation.push_back(Eigen::VectorXd::Zero(6));
     _perturbation_mtxs.emplace_back();
-    _wrench_fb.push_back(Eigen::VectorXd::Zero(6));
+    _wrench_fb.push_back(Eigen::VectorXd::Zero(12));
     _wrench_fb_mtxs.emplace_back();
     _camera_rgb_timestamps_ms.push_back(Eigen::VectorXd());
     _pose_timestamps_ms.push_back(Eigen::VectorXd());

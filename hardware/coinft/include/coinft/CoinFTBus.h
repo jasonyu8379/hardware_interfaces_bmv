@@ -8,6 +8,7 @@
 #include <csignal>
 #include <map>
 #include <mutex>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
 #include <vector>
@@ -26,6 +27,12 @@ struct CoinFTSensor {
   std::vector<double> latestData;
   std::mutex mutex;
 
+  /* --- normalisation constants -------------------------------- */
+  Eigen::VectorXd mu_x;  // 12×1
+  Eigen::VectorXd sd_x;  // 12×1
+  Eigen::VectorXd mu_y;  // 6×1Add commentMore actions
+  Eigen::VectorXd sd_y;  // 6×1
+
   // Move constructor
   CoinFTSensor(CoinFTSensor&& other) noexcept
       : address(other.address),
@@ -37,7 +44,11 @@ struct CoinFTSensor {
         tareSampleTarget(other.tareSampleTarget),
         tareSamples(std::move(other.tareSamples)),
         tareOffset(std::move(other.tareOffset)),
-        latestData(std::move(other.latestData)) {}
+        latestData(std::move(other.latestData)),
+        mu_x(std::move(other.mu_x)),
+        sd_x(std::move(other.sd_x)),
+        mu_y(std::move(other.mu_y)),
+        sd_y(std::move(other.sd_y)) {}
 
   // Move assignment operator
   CoinFTSensor& operator=(CoinFTSensor&& other) noexcept {
@@ -52,6 +63,10 @@ struct CoinFTSensor {
       tareSamples = std::move(other.tareSamples);
       tareOffset = std::move(other.tareOffset);
       latestData = std::move(other.latestData);
+      mu_x = std::move(other.mu_x);
+      sd_x = std::move(other.sd_x);
+      mu_y = std::move(other.mu_y);
+      sd_y = std::move(other.sd_y);
     }
     return *this;
   }
@@ -76,12 +91,9 @@ class CoinFTBus {
   static constexpr uint8_t STX = 0x02;  // Start of Transmission byte
   static constexpr uint8_t ETX = 0x03;  // End of Transmission byte
 
-  // Force and moment scaling factors
-  static constexpr double FORCE_SCALING = 1.0;
-  static constexpr double MOMENT_SCALING = 30.0;
-
   CoinFTBus(const std::string& port, unsigned int baud_rate,
-            const std::vector<std::pair<int, std::string>>& sensorConfigs);
+            const std::vector<std::tuple<int, std::string, std::string>>&
+                sensorConfigs);
   ~CoinFTBus();
 
   void startStreaming();

@@ -135,7 +135,7 @@ struct ManipServerConfig {
 ///   server.join_threads();
 class ManipServer {
  public:
-  ManipServer() {};
+  ManipServer(){};
   ManipServer(const std::string&);
   ~ManipServer();
 
@@ -217,6 +217,7 @@ class ManipServer {
   std::vector<RUT::Matrix6d> _stiffnesses_low{};
   std::vector<RUT::Matrix6d> _dampings_high{};
   std::vector<RUT::Matrix6d> _dampings_low{};
+  std::vector<int> _num_ft_sensors{};  // number of force sensors
 
   // list of id
   std::vector<int> _id_list;

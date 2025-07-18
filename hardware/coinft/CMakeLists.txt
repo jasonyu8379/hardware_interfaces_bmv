@@ -11,13 +11,26 @@ find_library(ONNXRUNTIME_LIB onnxruntime HINTS ${ONNXRUNTIME_ROOT}/lib)
 
 # Include the Boost headers
 include_directories(${Boost_INCLUDE_DIRS})
+# === JSON (fetch from internet if not already installed) ===
+include(FetchContent)
+FetchContent_Declare(
+  nlohmann_json
+  URL https://github.com/nlohmann/json/releases/download/v3.11.2/json.tar.xz
+)
+FetchContent_MakeAvailable(nlohmann_json)
 
 # Include your project's header files
 include_directories(include)
 
 # Add the source files
 add_library(COINFTBUS SHARED src/CoinFTBus.cpp)
-target_link_libraries(COINFTBUS ${Boost_LIBRARIES} ${ONNXRUNTIME_LIB})
+# target_link_libraries(COINFTBUS ${Boost_LIBRARIES} ${ONNXRUNTIME_LIB} )
+
+target_link_libraries(COINFTBUS
+  ${Boost_LIBRARIES}
+  ${ONNXRUNTIME_LIB}
+  nlohmann_json::nlohmann_json
+)
 
 
 add_library(COIN_FT SHARED src/coin_ft.cpp)

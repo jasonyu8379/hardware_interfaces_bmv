@@ -35,15 +35,12 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
   pose_rdte_cmd = pose_fb;
   vel_fb << 0, 0, 0, 0, 0, 0;
 
-  int num_ft_sensors = 1;
-  if (!_config.mock_hardware)
-    num_ft_sensors = force_sensor_ptrs[id]->getNumSensors();
-
+  std::cout << "[DEBUG] initializing wrench_fb" << std::endl;
   RUT::Vector6d wrench_fb_ur;  // wrench feedback from ur
-  RUT::VectorXd wrench_fb_sensor =
-      RUT::VectorXd::Zero(6 * num_ft_sensors);  // wrench feedback from sensor
-  RUT::Vector6d wrench_fb;                      // wrench feedback selected
-  RUT::Vector6d wrench_WTr;                     // wrench command
+  RUT::VectorXd wrench_fb_sensor = RUT::VectorXd::Zero(
+      6 * _num_ft_sensors[id]);  // wrench feedback from sensor
+  RUT::Vector6d wrench_fb;       // wrench feedback selected
+  RUT::Vector6d wrench_WTr;      // wrench command
   RUT::Matrix6d stiffness;
 
   // TODO: use base pointer robot_ptr instead of URRTDE
@@ -431,12 +428,15 @@ void ManipServer::eoat_loop(const RUT::TimePoint& time0, int id) {
 
     // Send command to EoAT
     double force_fb = 0;
-    // {
-    //   std::lock_guard<std::mutex> lock(_wrench_fb_mtxs[id]);
-    //   // TODO: currently, assuming the grasping force is captured by Z axis of the first wrench sensor.
-    //   // Need to find a better way to specify it.
-    //   force_fb = _wrench_fb[id][2];
-    // }
+    {
+      std::lock_guard<std::mutex> lock(_wrench_fb_mtxs[id]);
+      // TODO: currently, assuming the grasping force is captured by Z axis of the first wrench sensor.
+      // Need to find a better way to specify it.
+      //force_fb = _wrench_fb[id][2];
+      // _wrench_fb is a 12 dimensinoal vector with [left_wrench, right_wrench] in TCP.
+
+      force_fb = (-_wrench_fb[id][0] + _wrench_fb[id][6]) / 2;
+    }
     eoat_cmd[1] -= force_fb;
     if ((!_config.mock_hardware) && (!eoat_ptrs[id]->setJointsPosForce(
                                         eoat_cmd.head(1), eoat_cmd.tail(1)))) {
@@ -504,12 +504,10 @@ void ManipServer::wrench_loop(const RUT::TimePoint& time0, int publish_rate,
   RUT::Timer timer;
   timer.tic(time0);  // so this timer is synced with the main timer
 
-  int num_ft_sensors = 1;
+  int num_ft_sensors = _num_ft_sensors[id];
+  std::cout << header << "Number of FT sensors: " << num_ft_sensors
+            << std::endl;
   if (!_config.mock_hardware) {
-    num_ft_sensors = force_sensor_ptrs[id]->getNumSensors();
-
-    std::cout << header << "Number of FT sensors: " << num_ft_sensors
-              << std::endl;
     // wait for force sensor to be ready
     std::cout << header
               << "Waiting for force sensor to start "

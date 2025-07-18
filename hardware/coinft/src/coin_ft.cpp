@@ -37,9 +37,11 @@ bool CoinFT::init(RUT::TimePoint time0, const CoinFTConfig& config) {
   _adj_sensor_tool_right =
       RUT::SE32Adj(RUT::pose2SE3(config.PoseSensorToolRight));
 
-  std::vector<std::pair<int, std::string>> sensorConfigs = {
-      {CoinFTBus::LEFT, config.left_calibration_file},
-      {CoinFTBus::RIGHT, config.right_calibration_file}};
+  std::vector<std::tuple<int, std::string, std::string>> sensorConfigs = {
+      {CoinFTBus::LEFT, config.left_calibration_file,
+       config.left_normalization_file},
+      {CoinFTBus::RIGHT, config.right_calibration_file,
+       config.right_normalization_file}};
 
   _coinft_bus_ptr =
       std::make_shared<CoinFTBus>(config.port, config.baud_rate, sensorConfigs);

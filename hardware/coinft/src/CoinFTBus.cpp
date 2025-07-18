@@ -5,6 +5,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <thread>
 #include <vector>
@@ -21,7 +22,7 @@ std::mutex instanceMutex;
 //----------------------------------------------------------------
 CoinFTBus::CoinFTBus(
     const std::string& port, unsigned int baud_rate,
-    const std::vector<std::pair<int, std::string>>& sensorConfigs)
+    const std::vector<std::tuple<int, std::string, std::string>>& sensorConfigs)
     : serial(io), running(false), packet_size(0), num_raw_channels(0) {
   {
     std::lock_guard<std::mutex> lock(instanceMutex);
@@ -50,8 +51,9 @@ CoinFTBus::CoinFTBus(
 
   // Load sensor configurations
   for (const auto& config : sensorConfigs) {
-    int address = config.first;
-    const std::string& model_file = config.second;
+    int address;
+    std::string model_file, json_path;
+    std::tie(address, model_file, json_path) = config;
 
     CoinFTSensor sensor;
     sensor.address = address;
@@ -60,6 +62,32 @@ CoinFTBus::CoinFTBus(
     sensor.tareSampleTarget = 100;
     sensor.tareOffset = Eigen::VectorXd::Zero(num_raw_channels);
     sensor.latestData = std::vector<double>(6, 0.0);
+
+    /* ---------- load μ/σ JSON ------------------ */
+    std::ifstream jf(json_path);
+    if (!jf)
+      throw std::runtime_error("Cannot open " + json_path);
+    nlohmann::json j;
+    jf >> j;
+
+    auto vec12 = [](const nlohmann::json& a) {
+      Eigen::VectorXd v(12);
+      for (int i = 0; i < 12; ++i)
+        v(i) = a.at(i).get<double>();
+      return v;
+    };
+    auto vec6 = [](const nlohmann::json& a) {
+      Eigen::VectorXd v(6);
+      for (int i = 0; i < 6; ++i)
+        v(i) = a.at(i).get<double>();
+      return v;
+    };
+
+    sensor.mu_x = vec12(j["mu_x"]);
+    sensor.sd_x = vec12(j["sd_x"]);
+    sensor.mu_y = vec6(j["mu_y"]);
+    sensor.sd_y = vec6(j["sd_y"]);
+    /* ------------------------------------------- */
 
     // Create ONNX session options. TODO: what does this do, line by line?
     Ort::SessionOptions session_options;
@@ -450,10 +478,13 @@ void CoinFTBus::dataAcquisitionLoop() {
         // Process the reading if taring is complete.
         Eigen::VectorXd adjustedInput = rawInput - sensor.tareOffset;
 
+        Eigen::VectorXd normIn =
+            (adjustedInput - sensor.mu_x).cwiseQuotient(sensor.sd_x);
+
         // Build the input tensor for ONNX inference.
         std::vector<float> input_tensor_values(num_raw_channels);
         for (int i = 0; i < num_raw_channels; ++i) {
-          input_tensor_values[i] = static_cast<float>(adjustedInput(i));
+          input_tensor_values[i] = static_cast<float>(normIn(i));
         }
         std::array<int64_t, 2> input_shape = {1, num_raw_channels};
 
@@ -472,16 +503,20 @@ void CoinFTBus::dataAcquisitionLoop() {
                                 &input_tensor, 1, output_names.data(), 1);
         float* float_array = output_tensors[0].GetTensorMutableData<float>();
 
-        // Apply scaling factors.
+        // y_n is normalized output
+        Eigen::VectorXd y_n(6);
+        for (int i = 0; i < 6; ++i)
+          y_n(i) = static_cast<double>(float_array[i]);
+
+        // y_phys is physical output
+        Eigen::VectorXd y_phys =
+            y_n.cwiseProduct(sensor.sd_y).array() + sensor.mu_y.array();
+
         std::vector<double> ft(6);
-        ft[0] = static_cast<double>(float_array[0]) / FORCE_SCALING;
-        ft[1] = static_cast<double>(float_array[1]) / FORCE_SCALING;
-        ft[2] = static_cast<double>(float_array[2]) / FORCE_SCALING;
-        ft[3] = static_cast<double>(float_array[3]) / MOMENT_SCALING;
-        ft[4] = static_cast<double>(float_array[4]) / MOMENT_SCALING;
-        ft[5] = static_cast<double>(float_array[5]) / MOMENT_SCALING;
 
         // Update the sensor's latest data.
+        for (int i = 0; i < 6; ++i)
+          ft[i] = y_phys(i);
         sensor.latestData = ft;
       }  // end lock on sensors_mutex
 
