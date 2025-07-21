@@ -184,30 +184,28 @@ bool ManipServer::initialize(const std::string& config_path) {
             return false;
           }
           wrench_publish_rate.push_back(robotiq_config.publish_rate);
-        }
-        // else if (_config.force_sensing_mode ==
-        //            ForceSensingMode::FORCE_MODE_COINFT) {
-        //   CoinFT::CoinFTConfig coinft_config;
-        //   try {
-        //     coinft_config.deserialize(config["coinft" + std::to_string(id)]);
-        //   } catch (const std::exception& e) {
-        //     std::cerr << "Failed to load the CoinFT config file: " << e.what()
-        //               << std::endl;
-        //     return false;
-        //   }
-        //   force_sensor_ptrs.emplace_back(new CoinFT);
-        //   CoinFT* coinft_ptr =
-        //       static_cast<CoinFT*>(force_sensor_ptrs[id].get());
-        //   if (!coinft_ptr->init(time0, coinft_config)) {
-        //     std::cerr << "Failed to initialize CoinFT for id " << id
-        //               << ". Exiting." << std::endl;
-        //     return false;
-        //   }
-        //   // CoinFT is blocking and don't need a timed loop.
-        //   // so the loop rate in manipserver can be anything faster than 360hz
-        //   wrench_publish_rate.push_back(1000);
-        // }
-        else {
+        } else if (_config.force_sensing_mode ==
+                   ForceSensingMode::FORCE_MODE_COINFT) {
+          CoinFT::CoinFTConfig coinft_config;
+          try {
+            coinft_config.deserialize(config["coinft" + std::to_string(id)]);
+          } catch (const std::exception& e) {
+            std::cerr << "Failed to load the CoinFT config file: " << e.what()
+                      << std::endl;
+            return false;
+          }
+          force_sensor_ptrs.emplace_back(new CoinFT);
+          CoinFT* coinft_ptr =
+              static_cast<CoinFT*>(force_sensor_ptrs[id].get());
+          if (!coinft_ptr->init(time0, coinft_config)) {
+            std::cerr << "Failed to initialize CoinFT for id " << id
+                      << ". Exiting." << std::endl;
+            return false;
+          }
+          // CoinFT is blocking and don't need a timed loop.
+          // so the loop rate in manipserver can be anything faster than 360hz
+          wrench_publish_rate.push_back(1000);
+        } else {
           std::cerr << "Invalid force sensing mode. Exiting." << std::endl;
           return false;
         }

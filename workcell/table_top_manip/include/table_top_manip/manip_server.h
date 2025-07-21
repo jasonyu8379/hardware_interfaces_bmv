@@ -23,7 +23,7 @@
 #include <hardware_interfaces/types.h>
 // hardware used in this app
 #include <ati_netft/ati_netft.h>
-// #include <coinft/coin_ft.h>
+#include <coinft/coin_ft.h>
 #include <gopro/gopro.h>
 #include <oak/oak.h>
 // #include <realsense/realsense.h>

@@ -31,7 +31,7 @@ target_link_libraries(ManipServer
   RQSensorLinux
   UR_RTDE
   WSG_GRIPPER
-  # COIN_FT
+  COIN_FT
   HI_COMMON
   ${RUT}
   ${FORCE_CONTROLLERS}

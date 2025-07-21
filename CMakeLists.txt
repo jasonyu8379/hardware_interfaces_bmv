@@ -18,8 +18,8 @@ find_library(RUT Utilities HINTS ${CMAKE_INSTALL_PREFIX}/lib/RobotUtilities)
 find_library(FORCE_CONTROLLERS FORCE_CONTROLLERS HINTS ${CMAKE_INSTALL_PREFIX}/lib/)
 
 # TODO: really only CoinFT should need to include this
-# set(ONNXRUNTIME_ROOT "/opt/onnxruntime")
-# include_directories(${ONNXRUNTIME_ROOT}/include)
+set(ONNXRUNTIME_ROOT "/opt/onnxruntime")
+include_directories(${ONNXRUNTIME_ROOT}/include)
 
 include_directories(
   include/
@@ -31,7 +31,7 @@ add_library(HI_COMMON SHARED
 
 # hardware to build
 add_subdirectory(hardware/ati_netft)
-# add_subdirectory(hardware/coinft)
+add_subdirectory(hardware/coinft)
 # add_subdirectory(hardware/realsense)
 add_subdirectory(hardware/gopro)
 add_subdirectory(hardware/oak)
@@ -79,6 +79,6 @@ target_link_libraries(test_hardware_interfaces
   ${RUT}
   WSG_GRIPPER
   ${YAMLLib} 
-  # COIN_FT
+  COIN_FT
   # spdlog::spdlog
 )
