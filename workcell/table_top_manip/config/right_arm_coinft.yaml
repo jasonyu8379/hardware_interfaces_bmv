@@ -71,24 +71,25 @@ ati_netft0:
   PoseSensorTool: [0, 0, -0.079, -0.25882,  0,  0,  0.9659258]
 
 coinft0:
-  port: "/dev/ttyACM1"
+  port: "/dev/ttyACM0"
   baud_rate: 115200
-  # left_calibration_file: "/shared_local/configs/coinft/SFT9-3_MLP_5L_norm_L2.onnx"
-  # right_calibration_file: "/shared_local/configs/coinft/SFT14-2_MLP_5L_norm_L2.onnx"
-  # left_normalization_file: "/shared_local/configs/coinft/SFT9-3_norm.json"
-  # right_normalization_file: "/shared_local/configs/coinft/SFT14-2_norm.json"
+  # For Zucchini
+  left_calibration_file: "/shared_local/configs/coinft/SFT9-3_MLP_5L_norm_L2.onnx"
+  right_calibration_file: "/shared_local/configs/coinft/SFT14-2_MLP_5L_norm_L2.onnx"
+  left_normalization_file: "/shared_local/configs/coinft/SFT9-3_norm.json"
+  right_normalization_file: "/shared_local/configs/coinft/SFT14-2_norm.json"
   # For WBW
-  left_calibration_file: "/shared_local/configs/coinft/SFT2-6_MLP_5L_norm_L2.onnx"
-  right_calibration_file: "/shared_local/configs/coinft/UFT10-4_MLP_5L_norm_L2.onnx"
-  left_normalization_file: "/shared_local/configs/coinft/SFT2-6_norm.json"
-  right_normalization_file: "/shared_local/configs/coinft/UFT10-4_norm.json"
+  # left_calibration_file: "/shared_local/configs/coinft/SFT2-6_MLP_5L_norm_L2.onnx"
+  # right_calibration_file: "/shared_local/configs/coinft/UFT10-4_MLP_5L_norm_L2.onnx"
+  # left_normalization_file: "/shared_local/configs/coinft/SFT2-6_norm.json"
+  # right_normalization_file: "/shared_local/configs/coinft/UFT10-4_norm.json"
   noise_level: 0.0
   stall_threshold: 100
   Foffset: [0, 0, 0]
   Toffset: [0, 0, 0]
   Gravity: [0, 0, 0]
   Pcom: [0, 0, 0]
-  WrenchSafety: [20.0, 20.0, 25.0, 1, 1, 1]
+  WrenchSafety: [20.0, 20.0, 25.0, 1, 1, 1] # in CoinFT frame
   PoseSensorToolLeft: [0.166, -0.081, 0, 0.707107, 0, -0.707107,  0]
   PoseSensorToolRight: [0.166, 0.081, 0, 0, -0.707107, 0,  0.707107]
   # PoseSensorToolLeft: [0.2, -0.086, 0, 0.5, -0.5, -0.5,  0.5]
@@ -107,7 +108,7 @@ wsg_gripper0:
   robot_ip: "192.168.2.111"
   port: "1000"
   velResControl_kp: 15.0 # 5  15  25 10  # 15 works; normal eraser# 20 for narrow eraser # for VanillaDP
-  velResControl_kf: 20.0  # 3  50  70 50  # 25 works; normal eraser # 30 for narrow eraser # 20 started working better after a crash
+  velResControl_kf: 20.0  # 3  50  S70 50  # 25 works; normal eraser # 30 for narrow eraser # 20 started working better after a crash
   PDControl_kp: 10.0
   PDControl_kd: 0.001
   js_interface_config:
