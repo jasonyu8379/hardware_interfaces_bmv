@@ -75,6 +75,7 @@ target_include_directories(test_hardware_interfaces PRIVATE
   hardware/robotiq_ft_modbus/include/
 )
 target_link_libraries(test_hardware_interfaces
+  HI_COMMON
   ${Boost_LIBRARIES}
   ${RUT}
   WSG_GRIPPER

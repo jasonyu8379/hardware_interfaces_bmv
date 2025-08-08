@@ -59,6 +59,11 @@ class WSGGripperDriver {
   unsigned char setVelResolvedControl(float pos_target,
                                       float force_target_feedback, float kp,
                                       float kf);
+
+  unsigned char setAccResolvedControl(float pos_target,
+                                      float force_target_feedback, float dt,
+                                      float K, float M, float D);
+
   unsigned char askForState();  // just to trigger a feedback package
 
   /// @brief Read a package with a specific id. Must be called after homing(), ackFastStop().

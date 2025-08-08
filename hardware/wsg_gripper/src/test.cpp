@@ -11,13 +11,17 @@
 #include "wsg_gripper/wsg_gripper_driver.h"
 
 int main() {
+  std::cout << "WSG Gripper Test" << std::endl;
   WSGGripper::WSGGripperConfig config;
-  config.robot_ip = "192.168.2.110";
+  config.robot_ip = "192.168.2.111";
   config.port = "1000";
   config.velResControl_kp = 10.0;
   config.velResControl_kf = 3;
   config.PDControl_kp = 10.0;
   config.PDControl_kd = 0.001;
+  config.accResControl_M = 0.5;
+  config.accResControl_D = 5.0;
+  config.accResControl_K = 15.0;
   config.js_interface_config.num_joints = 1;
   config.js_interface_config.range_safety_mode =
       RobotSafetyMode::SAFETY_MODE_STOP;
@@ -27,9 +31,11 @@ int main() {
   config.js_interface_config.safe_zone = Eigen::VectorXd::Zero(2);
   config.js_interface_config.safe_zone << 0, 90;
 
+  std::cout << "Config loaded." << std::endl;
   WSGGripper wsg_gripper;
   RUT::Timer timer;
   wsg_gripper.init(timer.tic(), config);
+  std::cout << "WSG Gripper initialized." << std::endl;
 
   RUT::VectorXd fb_pos = RUT::VectorXd::Zero(1);
   RUT::VectorXd target_pos = RUT::VectorXd::Zero(1);
@@ -40,6 +46,9 @@ int main() {
   wsg_gripper.getJoints(fb_pos);
 
   wsg_gripper.setJointsPosForce(target_pos, target_force);
+
+  std::cout << "Target position set to: " << target_pos[0]
+            << ", Target force set to: " << target_force[0] << std::endl;
   std::this_thread::sleep_for(std::chrono::milliseconds(10000));
   // for (int i = 0; i < 200; i++) {
   //   wsg_gripper.setJointsPosForce(target_pos, target_force);

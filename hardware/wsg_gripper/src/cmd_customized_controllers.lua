@@ -1,13 +1,18 @@
 -- Nicolas Alt, 2014-09-04
 -- Cheng Chi, 2023-07-27
 -- Yifan Hou, 2024-12-17
---   - Added Velocity resolved impedance control
+--   - Added Velocity resolved admittance control
+-- Yifan Hou, 2025-08-06
+--   - Added Acceleration resolved admittance control
 -- Command-and-measure script
 -- Tests showed about 30Hz rate
 require "socket"
 cmd.register(0xBA); -- Measure only
 cmd.register(0xBB); -- Position PD
-cmd.register(0xBC); -- Velocity-resolved impedance control
+cmd.register(0xBC); -- Velocity-resolved admittance control
+cmd.register(0xBD); -- Acceleration-resolved admittance control
+
+current_vel_cmd = 0.0; -- used by the Acceleration-resolved admittance control
 
 function hasbit(x, p)
   return x % (p + p) >= p       
@@ -15,6 +20,7 @@ end
 
 function send_state()
     -- ==== Get measurements ====
+    
     state = gripper.state();
     pos = mc.position();
     speed = mc.speed();
@@ -65,7 +71,7 @@ function process()
         end
     end
 
-    -- Velocity-resolved impedance control
+    -- Velocity-resolved admittance control
     if id == 0xBC then
         -- get args
         cmd_pos = bton({payload[1],payload[2],payload[3],payload[4]});
@@ -83,7 +89,36 @@ function process()
        
         -- command
         mc.speed(vel_cmd);
-        printf("cmd_pos:%f\n", cmd_pos);
+        printf("cmd_pos:%f cmd_force:%f\n", cmd_pos, cmd_force);
+    end
+
+    -- Acceleration-resolved admittance control
+    if id == 0xBD then
+        -- get args
+        cmd_dt = bton({payload[1],payload[2],payload[3],payload[4]});
+        cmd_K = bton({payload[5],payload[6],payload[7],payload[8]});  -- stiffness
+        cmd_M = bton({payload[9],payload[10],payload[11],payload[12]});  -- inertia
+        cmd_D = bton({payload[13],payload[14],payload[15],payload[16]});  -- damping
+        cmd_pos = bton({payload[17],payload[18],payload[19],payload[20]});  -- position command
+        cmd_force = bton({payload[21],payload[22],payload[23],payload[24]});  -- force fb minus command
+
+        -- get state
+        pos = mc.position();
+        vel = mc.speed();
+        
+        -- acc-resolved controller
+        acc_K = cmd_K/cmd_M * (cmd_pos - pos)
+        acc_V = - cmd_D/cmd_M * vel
+        acc_F = - cmd_force/cmd_M
+        
+        acc_cmd = acc_K + acc_V + acc_F
+        current_vel_cmd = current_vel_cmd + acc_cmd * cmd_dt;  -- integrate acceleration to get velocity command
+       
+        -- command
+        mc.speed(current_vel_cmd);
+        printf("acc:%f, acc_K:%f, acc_V:%f, acc_F:%f\n", acc_cmd, acc_K, acc_V, acc_F);
+        -- printf("cmd_pos:%f, vel:%f, acc:%f, force:%f\n", cmd_pos, vel, acc_cmd, cmd_force);
+    
     end
 
     
@@ -98,6 +133,7 @@ while true do
     if cmd.online() then
         if not pcall(process) then
             print("Error occured")
+            current_vel_cmd = 0.0;
             sleep(100)
         end
     else

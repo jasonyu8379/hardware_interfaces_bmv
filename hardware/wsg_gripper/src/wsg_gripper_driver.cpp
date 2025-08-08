@@ -36,6 +36,8 @@ static short _EMPTY = 0xBA;   // Customized: do nothing, just trigger a feedback
 static short _PDCTRL = 0xBB;  // Customized: PD control with force limit
 static short _VELRESCTRL =
     0xBC;  // Customized: Velocity-resolved impedance control
+static short _ACCRESCTRL =
+    0xBD;  // Customized: Acceleration-resolved impedance control
 
 std::array<char, 512> read_buffer;
 
@@ -525,6 +527,58 @@ unsigned char WSGGripperDriver::setVelResolvedControl(
   // create Message
   _msg.id = _VELRESCTRL;
   _msg.length = DATA_SIZE_VELRES;
+  _msg.data = data;
+
+  return sendMsg(&_msg);
+}
+
+unsigned char WSGGripperDriver::setAccResolvedControl(
+    float pos_target, float force_target_feedback, float dt, float K, float M,
+    float D) {
+#define DATA_SIZE_ACCRES 24
+  int i;
+  unsigned char data[DATA_SIZE_ACCRES];
+  unsigned char tmpFloat[4];
+
+  // dt
+  memcpy(tmpFloat, &dt, sizeof(float));
+  for (i = 0; i < 4; i++) {
+    data[i] = (unsigned char)tmpFloat[i];
+  }
+
+  // K
+  memcpy(tmpFloat, &K, sizeof(float));
+  for (i = 0; i < 4; i++) {
+    data[(i + 4)] = tmpFloat[i];
+  }
+
+  // M
+  memcpy(tmpFloat, &M, sizeof(float));
+  for (i = 0; i < 4; i++) {
+    data[(i + 8)] = tmpFloat[i];
+  }
+
+  // D
+  memcpy(tmpFloat, &D, sizeof(float));
+  for (i = 0; i < 4; i++) {
+    data[(i + 12)] = tmpFloat[i];
+  }
+
+  // cmd_pos
+  memcpy(tmpFloat, &pos_target, sizeof(float));
+  for (i = 0; i < 4; i++) {
+    data[(i + 16)] = tmpFloat[i];
+  }
+
+  // cmd_force
+  memcpy(tmpFloat, &force_target_feedback, sizeof(float));
+  for (i = 0; i < 4; i++) {
+    data[(i + 20)] = tmpFloat[i];
+  }
+
+  // create Message
+  _msg.id = _ACCRESCTRL;
+  _msg.length = DATA_SIZE_ACCRES;
   _msg.data = data;
 
   return sendMsg(&_msg);

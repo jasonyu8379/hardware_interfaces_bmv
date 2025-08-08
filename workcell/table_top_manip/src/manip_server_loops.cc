@@ -437,6 +437,8 @@ void ManipServer::eoat_loop(const RUT::TimePoint& time0, int id) {
 
       force_fb = (-_wrench_fb[id][0] + _wrench_fb[id][6]) / 2;
     }
+    // std::cout << header << "force_fb: " << force_fb
+    //           << ", force cmd: " << eoat_cmd[1] << std::endl;
     eoat_cmd[1] -= force_fb;
     if ((!_config.mock_hardware) && (!eoat_ptrs[id]->setJointsPosForce(
                                         eoat_cmd.head(1), eoat_cmd.tail(1)))) {

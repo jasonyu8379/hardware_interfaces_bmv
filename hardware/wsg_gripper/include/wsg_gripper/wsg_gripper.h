@@ -19,20 +19,26 @@ class WSGGripper : public JSInterfaces {
   struct WSGGripperConfig {
     std::string robot_ip{};
     std::string port{};
-    float velResControl_kp{0.0};
-    float velResControl_kf{0.0};
     float PDControl_kp{0.0};
     float PDControl_kd{0.0};
+    float velResControl_kp{0.0};
+    float velResControl_kf{0.0};
+    float accResControl_K{0.0};
+    float accResControl_M{0.0};
+    float accResControl_D{0.0};
     JSInterfaceConfig js_interface_config{};
 
     bool deserialize(const YAML::Node& node) {
       try {
         robot_ip = node["robot_ip"].as<std::string>();
         port = node["port"].as<std::string>();
-        velResControl_kp = node["velResControl_kp"].as<float>();
-        velResControl_kf = node["velResControl_kf"].as<float>();
         PDControl_kp = node["PDControl_kp"].as<float>();
         PDControl_kd = node["PDControl_kd"].as<float>();
+        velResControl_kp = node["velResControl_kp"].as<float>();
+        velResControl_kf = node["velResControl_kf"].as<float>();
+        accResControl_K = node["accResControl_K"].as<float>();
+        accResControl_M = node["accResControl_M"].as<float>();
+        accResControl_D = node["accResControl_D"].as<float>();
 
         js_interface_config.deserialize(node["js_interface_config"]);
       } catch (const std::exception& e) {

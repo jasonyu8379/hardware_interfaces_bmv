@@ -60,6 +60,7 @@ WSGGripper::Implementation::~Implementation() {
 bool WSGGripper::Implementation::initialize(
     RUT::TimePoint time0,
     const WSGGripper::WSGGripperConfig& wsg_gripper_config) {
+  std::cout << "[WSGGripper] Initializing WSG Gripper." << std::endl;
   _time0 = time0;
   _config = wsg_gripper_config;
 
@@ -85,6 +86,8 @@ bool WSGGripper::Implementation::initialize(
   cmd_id = _wsg_ptr->askForState();
   _wsg_state = _wsg_ptr->getState(cmd_id);
   _joints_set_prev[0] = static_cast<double>(_wsg_state.position);
+  std::cout << "[WSGGripper][Debug] EoAT initial position: "
+            << _joints_set_prev[0] << std::endl;
   _cmd_pos = _joints_set_prev;
 
   // start control loop
@@ -164,6 +167,7 @@ void WSGGripper::Implementation::controlLoop() {
   RUT::Timer timer;
   timer.tic();
   timer.set_loop_rate_hz(30);
+  double dt = 1.0 / 30.0;
   timer.start_timed_loop();
   while (true) {
     {
@@ -173,22 +177,36 @@ void WSGGripper::Implementation::controlLoop() {
       }
     }
 
-    // _wsg_ptr->setPDControl(static_cast<float>(_joints_set_processed[0]),
-    //                        static_cast<float>(_config.PDControl_kp),
-    //                        static_cast<float>(_config.PDControl_kd),
-    //                        static_cast<float>(forces[0]));
-
     // Step one: send control
     {
       std::lock_guard<std::mutex> lock(_cmd_mtx);
       cmd_pos = _cmd_pos;
       cmd_force = _cmd_force;
     }
-    unsigned char cmd_id = _wsg_ptr->setVelResolvedControl(
-        static_cast<float>(cmd_pos[0]), static_cast<float>(cmd_force[0]),
-        static_cast<float>(_config.velResControl_kp),
-        static_cast<float>(_config.velResControl_kf));
 
+    // _wsg_ptr->setPDControl(static_cast<float>(_joints_set_processed[0]),
+    //                        static_cast<float>(_config.PDControl_kp),
+    //                        static_cast<float>(_config.PDControl_kd),
+    //                        static_cast<float>(forces[0]));
+
+    // unsigned char cmd_id = _wsg_ptr->setVelResolvedControl(
+    //     static_cast<float>(cmd_pos[0]), static_cast<float>(cmd_force[0]),
+    //     static_cast<float>(_config.velResControl_kp),
+    //     static_cast<float>(_config.velResControl_kf));
+
+    unsigned char cmd_id = _wsg_ptr->setAccResolvedControl(
+        static_cast<float>(cmd_pos[0]), static_cast<float>(cmd_force[0]),
+        static_cast<float>(dt), static_cast<float>(_config.accResControl_K),
+        static_cast<float>(_config.accResControl_M),
+        static_cast<float>(_config.accResControl_D));
+
+    // loop timing and overrun check
+    double overrun_ms = timer.check_for_overrun_ms(false);
+    if (overrun_ms > 0) {
+      std::cout << "\033[33m";  // set color to bold yellow
+      std::cout << "[WSGGripper] Overrun: " << overrun_ms << "ms" << std::endl;
+      std::cout << "\033[0m";  // reset color to default
+    }
     timer.sleep_till_next();
 
     // Step two: get state
