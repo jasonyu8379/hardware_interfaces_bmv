@@ -64,13 +64,13 @@ int main() {
   RUT::VectorXd target_pos = RUT::VectorXd::Zero(1);
   RUT::VectorXd target_force = RUT::VectorXd::Zero(1);
 
-  target_pos[0] = 30.0;
-  double force_target = 16.0;
+  target_pos[0] = 25.0;
+  double force_target = 40.0;
 
   // get gripper states
   std::cout << "[main] Starting control loop." << std::endl;
   int count = 0;
-  while (timer.toc_ms() < 10000) {
+  while (timer.toc_ms() < 50000) {
     // read force feedback
     sensor.getWrenchTool(wrench, 2);
 
@@ -78,8 +78,8 @@ int main() {
     // double force_fb = 0;  // debug
     target_force[0] = force_target - force_fb;
 
-    std::cout << "Time: " << timer.toc_ms() << " ms, force_fb: " << force_fb
-              << std::endl;
+    std::cout << "Time: " << timer.toc_ms()
+              << " ms, target_force: " << target_force[0] << std::endl;
     // send command to gripper
     wsg_gripper.setJointsPosForce(target_pos, target_force);
     std::this_thread::sleep_for(std::chrono::milliseconds(30));

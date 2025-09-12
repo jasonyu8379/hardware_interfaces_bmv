@@ -189,16 +189,16 @@ void WSGGripper::Implementation::controlLoop() {
     //                        static_cast<float>(_config.PDControl_kd),
     //                        static_cast<float>(forces[0]));
 
-    // unsigned char cmd_id = _wsg_ptr->setVelResolvedControl(
-    //     static_cast<float>(cmd_pos[0]), static_cast<float>(cmd_force[0]),
-    //     static_cast<float>(_config.velResControl_kp),
-    //     static_cast<float>(_config.velResControl_kf));
-
-    unsigned char cmd_id = _wsg_ptr->setAccResolvedControl(
+    unsigned char cmd_id = _wsg_ptr->setVelResolvedControl(
         static_cast<float>(cmd_pos[0]), static_cast<float>(cmd_force[0]),
-        static_cast<float>(dt), static_cast<float>(_config.accResControl_K),
-        static_cast<float>(_config.accResControl_M),
-        static_cast<float>(_config.accResControl_D));
+        static_cast<float>(_config.velResControl_kp),
+        static_cast<float>(_config.velResControl_kf));
+
+    // unsigned char cmd_id = _wsg_ptr->setAccResolvedControl(
+    //     static_cast<float>(cmd_pos[0]), static_cast<float>(cmd_force[0]),
+    //     static_cast<float>(dt), static_cast<float>(_config.accResControl_K),
+    //     static_cast<float>(_config.accResControl_M),
+    //     static_cast<float>(_config.accResControl_D));
 
     // loop timing and overrun check
     double overrun_ms = timer.check_for_overrun_ms(false);
