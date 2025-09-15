@@ -32,7 +32,7 @@ wrench_filter_parameters: [5, 0.000143, 5] # cutoff frequency, sampling time, or
 check_robot_loop_overrun: false
 keys_to_monitor: [30, 31, 32] # [a, s, d]
 key_event_device: "/dev/input/event17"
-
+pose7_offset_TC: [0, 0.086, 0.2, 1, 0, 0, 0] # Toolframe offset for compliance control
 
 ur_rtde0:
   robot_ip: "192.168.2.106"
@@ -96,8 +96,10 @@ coinft0:
   Pcom: [0, 0, 0]
   WrenchSafety: [20.0, 20.0, 50.0, 1, 1, 1] # in CoinFT frame. For whiteboard, zucchini.
   # WrenchSafety: [20.0, 20.0, 80.0, 1, 1, 1] # in CoinFT frame. For lightbulb
-  PoseSensorToolLeft: [0.166, -0.081, 0, 0.707107, 0, -0.707107,  0]
-  PoseSensorToolRight: [0.166, 0.081, 0, 0, -0.707107, 0,  0.707107]
+  PoseSensorToolLeft: [0.166, -0.081, 0.08, 0.707107, 0, -0.707107,  0]
+  PoseSensorToolRight: [0.166, 0.081, 0.08, 0, -0.707107, 0,  0.707107]
+  # PoseSensorToolLeft: [0.166, -0.081, 0, 0.707107, 0, -0.707107,  0]
+  # PoseSensorToolRight: [0.166, 0.081, 0, 0, -0.707107, 0,  0.707107]
   # PoseSensorToolLeft: [0.2, -0.086, 0, 0.5, -0.5, -0.5,  0.5]
   # PoseSensorToolRight: [0.2, -0.086, 0, 0.5, -0.5, -0.5,  0.5]
 
@@ -114,7 +116,7 @@ wsg_gripper0:
   robot_ip: "192.168.2.112"
   port: "1000"
   velResControl_kp: 15.0 # 5  15  25 10  # 15 works; normal eraser# 20 for narrow eraser # for VanillaDP
-  velResControl_kf: 35.0  # 3  50  S70 50  # 25 works; normal eraser # 30 for narrow eraser # 20 started working better after a crash # 25 for zucchini # 35 for lightbulb
+  velResControl_kf: 15.0  # 3  50  S70 50  # 25 works; normal eraser # 30 for narrow eraser # 20 started working better after a crash # 25 for zucchini # 35 for lightbulb
   PDControl_kp: 10.0
   PDControl_kd: 0.001
   accResControl_K: 0.5 # 0.5
@@ -134,7 +136,8 @@ admittance_controller0:
   alert_overrun: false
   compliance6d:
     stiffness: [300, 300, 300, 2, 2, 2] 
-    damping: [5, 5, 5, 0.3, 0.3, 0.3]
+    damping: [5, 5, 5, 0.05, 0.05, 0.05]
+    # damping: [5, 5, 5, 0.3, 0.3, 0.3]
     inertia: [0.2, 0.2, 0.2, 0.001, 0.001, 0.001]
     stiction: [0, 0, 0, 0, 0, 0]
   max_spring_force_magnitude: 25

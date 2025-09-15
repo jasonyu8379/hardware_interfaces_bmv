@@ -62,6 +62,8 @@ struct ManipServerConfig {
   std::vector<int> keys_to_monitor{};
   bool take_over_mode{
       false};  // let human to take over via kinethetic teaching when key is pressed
+  RUT::Vector7d pose7_offset_TC{
+      0, 0, 0, 1, 0, 0, 0};  // Toolframe offset for compliance control
 
   bool deserialize(const YAML::Node& node) {
     try {
@@ -102,7 +104,10 @@ struct ManipServerConfig {
       if (node["take_over_mode"]) {
         take_over_mode = node["take_over_mode"].as<bool>();
       }
-
+      if (node["pose7_offset_TC"]) {
+        pose7_offset_TC =
+            RUT::deserialize_vector<RUT::Vector7d>(node["pose7_offset_TC"]);
+      }
     } catch (const std::exception& e) {
       std::cerr << "Failed to load the config file: " << e.what() << std::endl;
       return false;

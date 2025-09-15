@@ -55,6 +55,19 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
   force_control_ref_pose = pose_fb;
   wrench_WTr.setZero();
 
+  // for compliance control tool offset
+  RUT::Matrix4d SE3_WTfb, SE3_CT, SE3_TC, SE3_WCfb, SE3_WTref, SE3_WCref,
+      SE3_WCcmd, SE3_WTcmd;
+  RUT::Matrix6d Adj_TC;
+  SE3_TC = RUT::pose2SE3(_config.pose7_offset_TC);
+  SE3_CT = RUT::SE3Inv(SE3_TC);
+  bool apply_tc_offset = true;
+  RUT::Vector7d temp_vec = _config.pose7_offset_TC;
+  temp_vec[3] = 0;
+  if (temp_vec.norm() < 1e-6) {
+    apply_tc_offset = false;
+  }
+
   bool ctrl_flag_saving = false;  // local copy
 
   bool perturbation_is_applied = false;
@@ -149,7 +162,7 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
     loop_profiler.start();
 
     // update control target from interpolation controller
-    if (!intp_controller.get_control(time_now_ms, force_control_ref_pose)) {
+    if (!intp_controller.get_control(time_now_ms, force_control_ref_pose, {})) {
       bool new_wp_found = false;
       {
         // need to get new waypoint from buffer
@@ -179,7 +192,7 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
         //           << pose_target_waypoint.transpose() << std::endl;
         intp_controller.keep_the_last_target(time_now_ms);
       }
-      intp_controller.get_control(time_now_ms, force_control_ref_pose);
+      intp_controller.get_control(time_now_ms, force_control_ref_pose, {});
     }
 
     loop_profiler.stop("intp_controller");
@@ -230,6 +243,17 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
     //           << ", wrench_WTr: " << wrench_WTr.transpose() << std::endl;
 
     // Update the compliance controller
+    if (apply_tc_offset) {
+      SE3_WTfb = RUT::pose2SE3(pose_fb);
+      SE3_WCfb = SE3_WTfb * SE3_TC;
+      RUT::SE32Pose(SE3_WCfb, pose_fb);
+      Adj_TC = RUT::SE32Adj(SE3_TC);
+      wrench_fb = Adj_TC.transpose() * wrench_fb;
+      SE3_WTref = RUT::pose2SE3(force_control_ref_pose);
+      SE3_WCref = SE3_WTref * SE3_TC;
+      RUT::SE32Pose(SE3_WCref, force_control_ref_pose);
+    }
+
     {
       std::lock_guard<std::mutex> lock(_controller_mtxs[id]);
       loop_profiler.stop("controller_lock");
@@ -248,6 +272,12 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
       _controllers[id].step(pose_rdte_cmd);
       loop_profiler.stop("controller_step");
       loop_profiler.start();
+    }
+
+    if (apply_tc_offset) {
+      SE3_WCcmd = RUT::pose2SE3(pose_rdte_cmd);
+      SE3_WTcmd = SE3_WCcmd * SE3_CT;
+      RUT::SE32Pose(SE3_WTcmd, pose_rdte_cmd);
     }
 
     // Send control command to the robot

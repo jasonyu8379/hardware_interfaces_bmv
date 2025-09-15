@@ -21,7 +21,7 @@ reset_all_elgato_devices()
 server = ms.ManipServer()
 if not server.initialize(
     # "/home/yifanhou/git/hardware_interfaces_internal/workcell/table_top_manip/config/single_arm_evaluation.yaml"
-    "/home/yifan/git/hardware_interfaces_internal/workcell/table_top_manip/config/right_arm_coinft.yaml"
+    "/home/yifan/git/hardware_interfaces/workcell/table_top_manip/config/right_arm_coinft.yaml"
 ):
     raise RuntimeError("Failed to initialize server")
 server.set_high_level_maintain_position()
@@ -39,7 +39,7 @@ print("[python] pose_fb:", pose_fb)
 # bgr = np.zeros((1080, 1080, 3), dtype=np.uint8)
 # cv2.namedWindow("image")
 
-server.set_force_controlled_axis(np.eye(6), 0)
+server.set_force_controlled_axis(np.eye(6), 6)
 print("[python] done set_force_controlled_axis")
 
 pose_cmd = copy.deepcopy(pose_fb)
@@ -73,16 +73,15 @@ for i in range(2):
     # bgr[:, :, 1] = rgb_row_combined[1080:2160, 0:1080]
     # bgr[:, :, 0] = rgb_row_combined[2160:3240, 0:1080]
     # # print(f"image size: {rgb_row_combined.shape}, rgb size: {rgb.shape}")
-
     # cv2.imshow("image", bgr)
     # key = cv2.waitKey(20)
 
     for j in range(5):
         pose_cmds[:, j] = pose_fb.reshape((7,))
-        pose_cmds[0, j] += deltas[i] * j
-        eoat_cmds[0, j] = 60
-        # eoat_cmds[0, j] = i * 100.0
-        eoat_cmds[1, j] = 10.0
+        # pose_cmds[0, j] += deltas[i] * j
+
+        # eoat_cmds[0, j] = 60
+        # eoat_cmds[1, j] = 10.0
 
     timepoints_ms = (
         np.array([0.0, 400, 800, 1200, 1600]) + server.get_timestamp_now_ms()
@@ -108,8 +107,6 @@ sleep(0.5)
 # server.stop_listening_key_events()
 
 server.join_threads()
-print("start draw" \
-"ing")
 
 # fig, axs = plt.subplots(1, 3, figsize=(9, 3), sharey=True)
 
