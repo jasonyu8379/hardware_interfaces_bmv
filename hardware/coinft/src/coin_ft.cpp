@@ -66,12 +66,6 @@ int CoinFT::getWrenchSensor(RUT::VectorXd& wrench, int num_of_sensors) {
     wrench[i + 6] = _latest_data_right[i];
   }
 
-  // // hack for umift: assume the two sensors give the same reading
-  // wrench.tail(6) = wrench.head(6);
-  // wrench[7] *= -1;  // flip the sign of the right sensor's Fy
-
-  // TODO: check stall
-
   // safety
   for (int i = 0; i < 6; ++i) {
     if ((abs(wrench[i]) > _config.WrenchSafety[i]) ||

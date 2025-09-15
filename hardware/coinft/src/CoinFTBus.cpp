@@ -23,7 +23,7 @@ std::mutex instanceMutex;
 CoinFTBus::CoinFTBus(
     const std::string& port, unsigned int baud_rate,
     const std::vector<std::tuple<int, std::string, std::string>>& sensorConfigs)
-    : serial(io), running(false), packet_size(0), num_raw_channels(0) {
+    : serial(io), running(false), num_raw_channels(0) {
   {
     std::lock_guard<std::mutex> lock(instanceMutex);
     activeInstances.push_back(this);
@@ -44,6 +44,14 @@ CoinFTBus::CoinFTBus(
   // Open the serial port
   serial.open(port);
   serial.set_option(boost::asio::serial_port_base::baud_rate(baud_rate));
+  serial.set_option(boost::asio::serial_port_base::character_size(8));
+  serial.set_option(boost::asio::serial_port_base::parity(
+      boost::asio::serial_port_base::parity::none));
+  serial.set_option(boost::asio::serial_port_base::stop_bits(
+      boost::asio::serial_port_base::stop_bits::one));
+  serial.set_option(boost::asio::serial_port_base::flow_control(
+      boost::asio::serial_port_base::flow_control::none));
+
   std::cout << "Opened serial port: " << port << std::endl;
 
   // Initialize the bus
@@ -59,7 +67,7 @@ CoinFTBus::CoinFTBus(
     sensor.address = address;
     sensor.tareInProgress = true;
     sensor.tareSampleCount = 0;
-    sensor.tareSampleTarget = 100;
+    sensor.tareSampleTarget = 1000;
     sensor.tareOffset = Eigen::VectorXd::Zero(num_raw_channels);
     sensor.latestData = std::vector<double>(6, 0.0);
 
@@ -182,22 +190,22 @@ void CoinFTBus::initializeBus() {
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
 #endif
 
-  std::cout << "[DEBUG] Sending QUERY command to get packet size..."
-            << std::endl;
-  sendChar(QUERY);
-  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  // std::cout << "[DEBUG] Sending QUERY command to get packet size..." << std::endl;
+  // sendChar(QUERY);
+  // std::this_thread::sleep_for(std::chrono::milliseconds(20));
 
   // Read response
-  std::vector<uint8_t> data = readData(1);
-  if (data.empty()) {
-    throw std::runtime_error(
-        "[ERROR] Failed to read packet size from sensor bus.");
-  }
+  // std::vector<uint8_t> data = readData(1);
+  // if (data.empty()) {
+  //     throw std::runtime_error("[ERROR] Failed to read packet size from sensor bus.");
+  // }
 
-  packet_size = static_cast<int>(data[0]) - 1;
-  num_raw_channels = (packet_size - 1) / 2;
-  std::cout << "[DEBUG] Packet size: " << packet_size
-            << ", Number of raw channels: " << num_raw_channels << std::endl;
+  // packet_size = static_cast<int>(data[0]) - 1;
+  // num_raw_channels = (packet_size - 1) / 2;
+  num_raw_channels =
+      CoinFTBus::COINFT_CHANNELS;  // fixed 12 channels per sensor
+  // std::cout << "[DEBUG] Packet size: " << packet_size
+  //           << ", Number of raw channels: " << num_raw_channels << std::endl;
 }
 
 //----------------------------------------------------------------
@@ -388,137 +396,149 @@ std::vector<uint8_t> CoinFTBus::readData(size_t length) {
 }
 
 //----------------------------------------------------------------
-// Data Acquisition Loop
+// Data Acquisition Loop  (UART: 2×CoinFT per packet, 0x00 0x00 header)
 //----------------------------------------------------------------
 void CoinFTBus::dataAcquisitionLoop() {
+  // UART packet: [0x00,0x00] + 12×u16 (LEFT) + 12×u16 (RIGHT)  ==> total 2 + 24 + 24 = 50 bytes
+  const int header_len = 2;
+  const int bytes_per_sensor = num_raw_channels * 2;         // expect 12→24
+  const int packet_len = header_len + 2 * bytes_per_sensor;  // expect 50
+
+  auto processSensor = [&](CoinFTSensor& sensor,
+                           const Eigen::VectorXd& rawInput, int sensorKey) {
+    std::lock_guard<std::mutex> sensor_lock(sensor.mutex);
+
+    // Tare collection
+    if (sensor.tareInProgress) {
+      sensor.tareSamples.push_back(rawInput);
+      sensor.tareSampleCount++;
+
+      if (sensor.tareSampleCount >= sensor.tareSampleTarget) {
+        // Match Python: discard first 5 samples if available
+        const int discard = std::min(5, sensor.tareSampleCount);
+        const int kept = sensor.tareSampleCount - discard;
+
+        if (kept <= 0) {
+          // Fallback: no valid samples, keep taring
+          return;
+        }
+
+        Eigen::VectorXd sum = Eigen::VectorXd::Zero(num_raw_channels);
+        for (int i = discard; i < sensor.tareSampleCount; ++i) {
+          sum += sensor.tareSamples[i];
+        }
+        sensor.tareOffset = sum / static_cast<double>(kept);
+
+        sensor.tareSamples.clear();
+        sensor.tareSampleCount = 0;
+        sensor.tareInProgress = false;
+        std::cout << "Taring completed for sensor key " << sensorKey
+                  << std::endl;
+      }
+      return;  // Skip further processing until taring is complete
+    }
+
+    // Normalize → ONNX → de-normalize
+    Eigen::VectorXd adjusted = rawInput - sensor.tareOffset;  // 12
+    Eigen::VectorXd normIn =
+        (adjusted - sensor.mu_x).cwiseQuotient(sensor.sd_x);  // 12
+
+    std::vector<float> input_tensor_values(num_raw_channels);
+    for (int i = 0; i < num_raw_channels; ++i)
+      input_tensor_values[i] = static_cast<float>(normIn(i));
+    std::array<int64_t, 2> input_shape = {1, num_raw_channels};
+
+    Ort::MemoryInfo memory_info =
+        Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+        memory_info, input_tensor_values.data(), input_tensor_values.size(),
+        input_shape.data(), input_shape.size());
+
+    std::vector<const char*> input_names = {sensor.input_name.c_str()};
+    std::vector<const char*> output_names = {sensor.output_name.c_str()};
+
+    auto output_tensors =
+        sensor.session->Run(Ort::RunOptions{nullptr}, input_names.data(),
+                            &input_tensor, 1, output_names.data(), 1);
+
+    float* yhat = output_tensors[0].GetTensorMutableData<float>();  // 6
+    Eigen::VectorXd y_n(6);
+    for (int i = 0; i < 6; ++i)
+      y_n(i) = static_cast<double>(yhat[i]);
+
+    // physical units: y = y_n * sd_y + mu_y
+    Eigen::VectorXd y_phys =
+        y_n.cwiseProduct(sensor.sd_y).array() + sensor.mu_y.array();
+
+    std::vector<double> ft(6);
+    for (int i = 0; i < 6; ++i)
+      ft[i] = y_phys(i);
+    sensor.latestData = std::move(ft);
+  };
 
   while (running.load()) {
     try {
-      // Wait for the STX byte.
-      uint8_t byte = 0;
-      do {
-        std::vector<uint8_t> b = readData(1);
-        if (b.empty())
-          continue;
-        byte = b[0];
-      } while (byte != STX && running.load());
-
-      if (!running.load())
-        break;
-
-      // Read the rest of the packet.
-      std::vector<uint8_t> packet = readData(packet_size);
-      if (packet.size() != static_cast<size_t>(packet_size)) {
-        std::cerr << "Incomplete packet received." << std::endl;
+      // Read a full UART packet
+      std::vector<uint8_t> packet = readData(packet_len);
+      if (packet.size() != static_cast<size_t>(packet_len)) {
+        // Timeout or short read
         continue;
       }
 
-      // Extract the sensor address.
-      uint8_t end_byte = packet[packet_size - 1];
-
-      if ((end_byte & 0x0F) != ETX) {
-        std::cerr
-            << "[ERROR] Bad end framing byte. Expected ETX (0x03), but got: 0x"
-            << std::hex << static_cast<int>(end_byte & 0x0F) << std::dec
-            << std::endl;
-        continue;  // Skip processing this packet
+      // Check 2-byte header (0x00, 0x00) as in Python
+      if (packet[0] != 0x00 || packet[1] != 0x00) {
+        // Try to resync by scanning for the 2-byte header within this buffer
+        bool found = false;
+        for (size_t i = 1; i + 1 < packet.size(); ++i) {
+          if (packet[i] == 0x00 && packet[i + 1] == 0x00) {
+            // We found a header inside; read the remaining tail to complete a full packet
+            const size_t already =
+                packet.size() - i;  // bytes from header we already have
+            std::vector<uint8_t> tail = readData(packet_len - already);
+            if (tail.size() != static_cast<size_t>(packet_len - already)) {
+              break;
+            }
+            std::vector<uint8_t> fixed(packet.begin() + i, packet.end());
+            fixed.insert(fixed.end(), tail.begin(), tail.end());
+            packet.swap(fixed);
+            found = true;
+            break;
+          }
+        }
+        if (!found)
+          continue;  // try again next loop
       }
 
-      int sensorAddress = end_byte >> 4;
-
-      // Extract raw sensor values.
-      std::vector<uint16_t> rawValues;
+      // Parse LEFT sensor (first 12×u16 after header)
+      Eigen::VectorXd rawLeft(num_raw_channels);
       for (int i = 0; i < num_raw_channels; ++i) {
-        int index = 2 * i;
-        uint16_t value = packet[index] + 256 * packet[index + 1];
-        rawValues.push_back(value);
+        const int off = header_len + 2 * i;
+        uint16_t v = static_cast<uint16_t>(packet[off] + 256 * packet[off + 1]);
+        rawLeft(i) = static_cast<double>(v);
       }
 
-      // Process the sensor's data.
+      // Parse RIGHT sensor (next 12×u16)
+      Eigen::VectorXd rawRight(num_raw_channels);
+      for (int i = 0; i < num_raw_channels; ++i) {
+        const int off = header_len + bytes_per_sensor + 2 * i;
+        uint16_t v = static_cast<uint16_t>(packet[off] + 256 * packet[off + 1]);
+        rawRight(i) = static_cast<double>(v);
+      }
+
+      // Process both sensors in one go
       {
         std::lock_guard<std::mutex> lock(sensors_mutex);
-        auto it = sensors.find(sensorAddress);
-        //TODO: what does sensos.end() mean?
-        if (it == sensors.end()) {
-          std::cerr << "Received data for unknown sensor address: "
-                    << sensorAddress << std::endl;
+
+        auto itL = sensors.find(LEFT);
+        auto itR = sensors.find(RIGHT);
+        if (itL == sensors.end() || itR == sensors.end()) {
+          std::cerr << "[WARN] LEFT/RIGHT sensor keys not found in sensors map."
+                    << std::endl;
           continue;
         }
-        CoinFTSensor& sensor = it->second;
-        std::lock_guard<std::mutex> sensor_lock(sensor.mutex);
-
-        // Convert raw values to an Eigen vector.
-        Eigen::VectorXd rawInput(num_raw_channels);
-        for (int i = 0; i < num_raw_channels; ++i) {
-          rawInput(i) = static_cast<double>(rawValues[i]);
-        }
-
-        // If taring is active, accumulate samples.
-        if (sensor.tareInProgress) {
-          sensor.tareSamples.push_back(rawInput);
-          sensor.tareSampleCount++;
-          if (sensor.tareSampleCount >= sensor.tareSampleTarget) {
-            // Compute the average tare offset.
-            Eigen::VectorXd sum = Eigen::VectorXd::Zero(num_raw_channels);
-            for (const auto& sample : sensor.tareSamples) {
-              sum += sample;
-            }
-            sensor.tareOffset =
-                sum / static_cast<double>(sensor.tareSampleCount);
-            sensor.tareSamples.clear();
-            sensor.tareSampleCount = 0;
-            sensor.tareInProgress = false;
-            std::cout << "Taring completed for sensor " << sensorAddress
-                      << std::endl;
-          }
-          // Skip further processing until taring is complete.
-          continue;
-        }
-
-        // Process the reading if taring is complete.
-        Eigen::VectorXd adjustedInput = rawInput - sensor.tareOffset;
-
-        Eigen::VectorXd normIn =
-            (adjustedInput - sensor.mu_x).cwiseQuotient(sensor.sd_x);
-
-        // Build the input tensor for ONNX inference.
-        std::vector<float> input_tensor_values(num_raw_channels);
-        for (int i = 0; i < num_raw_channels; ++i) {
-          input_tensor_values[i] = static_cast<float>(normIn(i));
-        }
-        std::array<int64_t, 2> input_shape = {1, num_raw_channels};
-
-        Ort::MemoryInfo memory_info =
-            Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-        Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
-            memory_info, input_tensor_values.data(), input_tensor_values.size(),
-            input_shape.data(), input_shape.size());
-
-        std::vector<const char*> input_names = {sensor.input_name.c_str()};
-        std::vector<const char*> output_names = {sensor.output_name.c_str()};
-
-        // Run the ONNX inference.
-        auto output_tensors =
-            sensor.session->Run(Ort::RunOptions{nullptr}, input_names.data(),
-                                &input_tensor, 1, output_names.data(), 1);
-        float* float_array = output_tensors[0].GetTensorMutableData<float>();
-
-        // y_n is normalized output
-        Eigen::VectorXd y_n(6);
-        for (int i = 0; i < 6; ++i)
-          y_n(i) = static_cast<double>(float_array[i]);
-
-        // y_phys is physical output
-        Eigen::VectorXd y_phys =
-            y_n.cwiseProduct(sensor.sd_y).array() + sensor.mu_y.array();
-
-        std::vector<double> ft(6);
-
-        // Update the sensor's latest data.
-        for (int i = 0; i < 6; ++i)
-          ft[i] = y_phys(i);
-        sensor.latestData = ft;
-      }  // end lock on sensors_mutex
+        processSensor(itL->second, rawLeft, LEFT);
+        processSensor(itR->second, rawRight, RIGHT);
+      }
 
     } catch (const std::exception& e) {
       std::cerr << "Exception in data acquisition loop: " << e.what()
