@@ -13,13 +13,22 @@ find_package(Boost REQUIRED COMPONENTS
   thread
   program_options
 )
+
+include_directories($ENV{HOME}/.local/include)
+link_directories($ENV{HOME}/.local/lib)
+
 find_library(YAMLLib yaml-cpp HINTS /usr/local/lib)
 find_library(RUT Utilities HINTS ${CMAKE_INSTALL_PREFIX}/lib/RobotUtilities)
 find_library(FORCE_CONTROLLERS FORCE_CONTROLLERS HINTS ${CMAKE_INSTALL_PREFIX}/lib/)
 
-# TODO: really only CoinFT should need to include this
-set(ONNXRUNTIME_ROOT "/opt/onnxruntime")
-include_directories(${ONNXRUNTIME_ROOT}/include)
+# # TODO: really only CoinFT should need to include this
+set(ONNXRUNTIME_ROOT $ENV{HOME}/onnxruntime)
+include_directories(
+  ${ONNXRUNTIME_ROOT}/include
+)
+link_directories(
+  ${ONNXRUNTIME_ROOT}/lib
+)
 
 include_directories(
   include/
@@ -30,14 +39,14 @@ add_library(HI_COMMON SHARED
 )
 
 # hardware to build
-add_subdirectory(hardware/ati_netft)
-add_subdirectory(hardware/coinft)
-# add_subdirectory(hardware/realsense)
-add_subdirectory(hardware/gopro)
-add_subdirectory(hardware/oak)
-add_subdirectory(hardware/robotiq_ft_modbus)
+#add_subdirectory(hardware/ati_netft)
+#add_subdirectory(hardware/coinft)
+add_subdirectory(hardware/realsense)
+#add_subdirectory(hardware/gopro)
+#add_subdirectory(hardware/oak)
+#add_subdirectory(hardware/robotiq_ft_modbus)
 add_subdirectory(hardware/ur_rtde)
-add_subdirectory(hardware/wsg_gripper)
+#add_subdirectory(hardware/wsg_gripper)
 
 # workcell to build
 # include every "include" directory under /hardware/*
@@ -50,8 +59,8 @@ add_subdirectory(workcell/test)
 file(GLOB WORKCELL_INCLUDE_DIRS "workcell/*/include")
 include_directories(${WORKCELL_INCLUDE_DIRS})
 add_subdirectory(applications/force_control_demo)
-add_subdirectory(applications/ft_calibration)
-add_subdirectory(applications/manipulation_data_collection)
+#add_subdirectory(applications/ft_calibration)
+#add_subdirectory(applications/manipulation_data_collection)
 
 
 # install common
@@ -62,24 +71,24 @@ install(TARGETS HI_COMMON
     DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/
 )
 
-# Test executable
-find_package(fmt REQUIRED)
-find_package(spdlog REQUIRED)
-add_executable(test_hardware_interfaces
-  test/main.cc
-)
-target_include_directories(test_hardware_interfaces PRIVATE
-  hardware/ati_netft/include/
-  # hardware/realsense/include/
-  hardware/ur_rtde/include/
-  hardware/robotiq_ft_modbus/include/
-)
-target_link_libraries(test_hardware_interfaces
-  HI_COMMON
-  ${Boost_LIBRARIES}
-  ${RUT}
-  WSG_GRIPPER
-  ${YAMLLib} 
-  COIN_FT
-  # spdlog::spdlog
-)
+# # Test executable
+# #find_package(fmt REQUIRED)
+# find_package(spdlog REQUIRED)
+# add_executable(test_hardware_interfaces
+#   test/main.cc
+# )
+# target_include_directories(test_hardware_interfaces PRIVATE
+#   #hardware/ati_netft/include/
+#   hardware/realsense/include/
+#   hardware/ur_rtde/include/
+#   #hardware/robotiq_ft_modbus/include/
+# )
+# target_link_libraries(test_hardware_interfaces
+#   HI_COMMON
+#   ${Boost_LIBRARIES}
+#   ${RUT}
+#   WSG_GRIPPER
+#   ${YAMLLib} 
+#   #COIN_FT
+#   # spdlog::spdlog
+# )

@@ -15,8 +15,8 @@ add_executable(ft_calibration src/main.cc)
 target_link_libraries(ft_calibration
   HI_COMMON
   UR_RTDE
-  ROBOTIQ_FT_HW
-  ATI_NETFT
+  #ROBOTIQ_FT_HW
+  #ATI_NETFT
   ${RUT}
   ${FORCE_CONTROLLERS}
   ${YAMLLib}

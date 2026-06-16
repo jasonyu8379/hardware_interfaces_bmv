@@ -23,15 +23,15 @@ include_directories(
 
 add_library(ManipServer SHARED src/manip_server.cc src/manip_server_loops.cc src/perturbation_generator.cc)
 target_link_libraries(ManipServer
-  # REALSENSE
-  ATI_NETFT
-  GoPro
-  OAK
-  ROBOTIQ_FT_HW
-  RQSensorLinux
+  REALSENSE
+  #ATI_NETFT
+  #GoPro
+  #OAK
+  #ROBOTIQ_FT_HW
+  #RQSensorLinux
   UR_RTDE
-  WSG_GRIPPER
-  COIN_FT
+  #WSG_GRIPPER
+  #COIN_FT
   HI_COMMON
   ${RUT}
   ${FORCE_CONTROLLERS}
