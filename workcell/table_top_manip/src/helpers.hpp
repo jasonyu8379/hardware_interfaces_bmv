@@ -64,25 +64,80 @@ inline std::string create_folder_for_new_episode(
   return episode_folder;
 }
 
+inline std::string create_folder_for_new_episode_multicam(
+  const std::string& data_folder, std::vector<int> id_list, std::vector<int> cam_id_list,
+  std::vector<std::string>& rgb_folders,
+  std::vector<std::string>& robot_json_files,
+  std::vector<std::string>& eoat_json_files,
+  std::vector<std::string>& wrench_json_files,
+  std::string& key_json_file_name,
+  std::string& teleop_json_file_name) {  // JY
+std::cout
+    << "[create_folder_for_new_episode] Creating folder for new episode at "
+    << data_folder << std::endl;
+int timestamp = std::chrono::seconds(std::time(NULL)).count();
+const auto timestamp_string = std::to_string(timestamp);
+std::string episode_folder = data_folder + "/episode_" + timestamp_string;
+
+if (!fs::exists(episode_folder)) {
+  fs::create_directory(episode_folder);
+} else {
+  std::cerr << "Episode folder " << episode_folder
+            << " already exists. Exiting." << std::endl;
+  exit(1);
+}
+rgb_folders.clear();
+robot_json_files.clear();
+eoat_json_files.clear();
+wrench_json_files.clear();
+for (int cam_id : cam_id_list) {
+  std::string rgb_folder = episode_folder + "/rgb_" + std::to_string(cam_id);
+  fs::create_directory(rgb_folder);
+  rgb_folders.push_back(rgb_folder);
+  std::cout << "[create_folder_for_new_episode] Created rgb folder: "
+            << rgb_folder << std::endl;
+}
+for (int id : id_list) {
+  std::string robot_json_file =
+      episode_folder + "/robot_data_" + std::to_string(id) + ".json";
+  std::string eoat_json_file =
+      episode_folder + "/eoat_data_" + std::to_string(id) + ".json";
+  std::string wrench_json_file =
+      episode_folder + "/wrench_data_" + std::to_string(id) + ".json";
+  robot_json_files.push_back(robot_json_file);
+  eoat_json_files.push_back(eoat_json_file);
+  wrench_json_files.push_back(wrench_json_file);
+  std::cout << "[create_folder_for_new_episode] generated robot file: "
+            << robot_json_file << std::endl;
+  std::cout << "[create_folder_for_new_episode] generated eoat file: "
+            << eoat_json_file << std::endl;
+  std::cout << "[create_folder_for_new_episode] generated wrench file: "
+            << wrench_json_file << std::endl;
+}
+key_json_file_name = episode_folder + "/key_data.json";
+teleop_json_file_name = episode_folder + "/teleop_data.json";  // JY
+return episode_folder;
+}
+
 inline bool save_robot_data_json(std::ostream& os, int seq_id,
-                                 double timestamp_ms, const RUT::Vector7d& pose,
-                                 const RUT::Vector6d& robot_wrench, bool mask) {
-  Eigen::IOFormat good_looking_fmt(Eigen::StreamPrecision, Eigen::DontAlignCols,
-                                   ", ", ", ", "", "", "", "");
-  os << "\t{\n";
-  os << "\t\t\"seq_id\": " << seq_id << ",\n";
-  os << "\t\t\"mask\": " << mask << ",\n";
-  os << "\t\t\"robot_time_stamps\": " << std::fixed << std::setprecision(2)
-     << timestamp_ms << ",\n";
-  os << std::fixed << std::setprecision(7);
-  os << "\t\t\"ts_pose_fb\": [" << pose.format(good_looking_fmt) << "],\n";
-  os << "\t\t\"robot_wrench\": [" << robot_wrench.format(good_looking_fmt)
-     << "],\n";
-  return true;
+  double timestamp_ms, const RUT::Vector7d& pose,
+  const RUT::Vector6d& robot_wrench, bool mask) {
+Eigen::IOFormat good_looking_fmt(Eigen::StreamPrecision, Eigen::DontAlignCols,
+    ", ", ", ", "", "", "", "");
+os << "\t{\n";
+os << "\t\t\"seq_id\": " << seq_id << ",\n";
+os << "\t\t\"mask\": " << mask << ",\n";
+os << "\t\t\"robot_time_stamps\": " << std::fixed << std::setprecision(2)
+<< timestamp_ms << ",\n";
+os << std::fixed << std::setprecision(7);
+os << "\t\t\"ts_pose_fb\": [" << pose.format(good_looking_fmt) << "],\n";
+os << "\t\t\"robot_wrench\": [" << robot_wrench.format(good_looking_fmt)
+<< "],\n";
+return true;
 }
 
 inline bool save_eoat_data_json(std::ostream& os, int seq_id,
-                                double timestamp_ms, const RUT::Vector1d& pos) {
+                                double timestamp_ms, const RUT::VectorXd& pos) {
   Eigen::IOFormat good_looking_fmt(Eigen::StreamPrecision, Eigen::DontAlignCols,
                                    ", ", ", ", "", "", "", "");
   os << "\t{\n";
@@ -119,6 +174,19 @@ inline bool save_key_data_json(std::ostream& os, int seq_id,
      << timestamp_ms << ",\n";
   os << std::fixed << std::setprecision(7);
   os << "\t\t\"key_event\": " << key_event << "\n";
+  return true;
+}
+
+// JY: log teleop button/amplify events to teleop_data.json
+inline bool save_teleop_data_json(std::ostream& os, int seq_id,
+                                  double timestamp_ms, int btn1, int btn2, int amplify) {
+  os << "\t{\n";
+  os << "\t\t\"seq_id\": " << seq_id << ",\n";
+  os << "\t\t\"teleop_time_stamps\": " << std::fixed << std::setprecision(2)
+     << timestamp_ms << ",\n";
+  os << "\t\t\"btn1\": " << btn1 << ",\n";
+  os << "\t\t\"btn2\": " << btn2 << ",\n";
+  os << "\t\t\"amplify\": " << amplify << "\n";
   return true;
 }
 

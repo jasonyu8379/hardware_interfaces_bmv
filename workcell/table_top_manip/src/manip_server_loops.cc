@@ -2,6 +2,7 @@
 
 #include <RobotUtilities/interpolation_controller.h>
 #include <opencv2/core/eigen.hpp>
+#include <optional>
 
 #include <fcntl.h>        // for key loop
 #include <linux/input.h>  // for key loop
@@ -10,6 +11,7 @@
 
 #include "helpers.hpp"
 
+#include <algorithm>  // JY: std::clamp for teleop_loop velocity clamping
 #include <cmath>
 #include <opencv2/imgproc.hpp>
 #include <vector>
@@ -162,7 +164,7 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
     loop_profiler.start();
 
     // update control target from interpolation controller
-    if (!intp_controller.get_control(time_now_ms, force_control_ref_pose, {})) {
+    if (!intp_controller.get_control(time_now_ms, force_control_ref_pose, std::nullopt)) {
       bool new_wp_found = false;
       {
         // need to get new waypoint from buffer
@@ -192,7 +194,7 @@ void ManipServer::robot_loop(const RUT::TimePoint& time0, int id) {
         //           << pose_target_waypoint.transpose() << std::endl;
         intp_controller.keep_the_last_target(time_now_ms);
       }
-      intp_controller.get_control(time_now_ms, force_control_ref_pose, {});
+      intp_controller.get_control(time_now_ms, force_control_ref_pose, std::nullopt);
     }
 
     loop_profiler.stop("intp_controller");
@@ -370,8 +372,8 @@ void ManipServer::eoat_loop(const RUT::TimePoint& time0, int id) {
   timer.tic(time0);  // so this timer is synced with the main timer
 
   RUT::VectorXd pos_fb = RUT::VectorXd::Zero(1);
-  RUT::Vector2d eoat_target_waypoint;
-  RUT::Vector2d eoat_cmd;
+  RUT::VectorXd eoat_target_waypoint = RUT::VectorXd::Zero(2);
+  RUT::VectorXd eoat_cmd = RUT::VectorXd::Zero(2);
 
   if (!_config.mock_hardware) {
     eoat_ptrs[id]->getJoints(pos_fb);
@@ -980,5 +982,449 @@ void ManipServer::key_loop(const RUT::TimePoint& time0) {
   // Close the input device
   close(fd);
 
+  std::cout << header << "Joined." << std::endl;
+}
+
+// JY: Touch haptic teleoperation loop — runs at 200 Hz.
+// Waits for Button 1 rising edge to activate, then streams target poses to
+// the robot. Button 2 toggles amplify mode (velocity integration instead of
+// absolute delta). Button 1 + Button 2 together deactivates teleoperation.
+void ManipServer::teleop_loop(const RUT::TimePoint& time0) {
+  const std::string header = "[ManipServer][teleop thread]: ";
+  std::cout << header << "starting thread." << std::endl;
+
+  if (!_touch_ptr || !_touch_ptr->is_data_ready()) {
+    std::cerr << header << "Touch not available. Exiting.\n";
+    {
+      std::lock_guard<std::mutex> lock(_ctrl_mtx);
+      _state_teleop_thread_ready = true;
+    }
+    return;
+  }
+
+  // Build HD -> robot rotation from config: Ry * Rx * Rz ordering,
+  // matching the original MAA_data_collection_v2.py convention.
+  const double DEG2RAD = M_PI / 180.0;
+  Eigen::Matrix3d hd2rob_R =
+      Eigen::AngleAxisd(_touch_config.hd2rob_euler_deg[0] * DEG2RAD,
+                        Eigen::Vector3d::UnitY()).toRotationMatrix() *
+      Eigen::AngleAxisd(_touch_config.hd2rob_euler_deg[1] * DEG2RAD,
+                        Eigen::Vector3d::UnitX()).toRotationMatrix() *
+      Eigen::AngleAxisd(_touch_config.hd2rob_euler_deg[2] * DEG2RAD,
+                        Eigen::Vector3d::UnitZ()).toRotationMatrix();
+
+  {
+    std::lock_guard<std::mutex> lock(_ctrl_mtx);
+    _state_teleop_thread_ready = true;
+  }
+  std::cout << header << "Loop started." << std::endl;
+
+  bool was_btn1 = false;
+  bool was_btn2 = false;
+  bool amplify_mode = false;
+  bool teleop_active_local = false;   // JY: tracked locally, updated on start/stop
+  bool saving_was_active = false;     // JY: detect _ctrl_flag_saving transitions driven by R key
+
+  // Reference state captured when teleop activates (or re-references)
+  double ref_x{0}, ref_y{0}, ref_z{0};
+  double ref_gimbals[3] = {0.0, 0.0, 0.0};  // JY: replaces q_ref; gimbal angles captured at activation
+  RUT::Vector7d robot_initial_pose;
+  robot_initial_pose << 0, 0, 0, 1, 0, 0, 0;
+  Eigen::Quaterniond q_robot_initial = Eigen::Quaterniond::Identity();
+  Eigen::Quaterniond q_prev = Eigen::Quaterniond::Identity();
+
+
+  int print_counter = 0;  // JY: diagnostic
+
+  // JY: haptic force feedback state (persists across the while loop iterations)
+  Eigen::Vector3d f_filt = Eigen::Vector3d::Zero();      // IIR filter state
+  Eigen::Vector3d f_cmd_prev = Eigen::Vector3d::Zero();  // for slew-rate limiting (filtering path)
+  double hap_ramp = 0.0;                                 // contact ramp [0,1]
+  Eigen::Vector3d hap_wrench_offset = Eigen::Vector3d::Zero();  // tare captured at activation
+  Eigen::Vector3d GinF_tare = Eigen::Vector3d::Zero();   // JY: gravity-in-sensor-frame at tare pose
+  double hap_eq_pos[3] = {0.0, 0.0, 0.0};               // JY: Touch position spring equilibrium (mm)
+  double k_prev[3]    = {0.0, 0.0, 0.0};                // JY: per-axis stiffness from previous step (for slew-rate limiting)
+  const int    control_freq = 900;                       // JY: haptic loop rate (Hz)
+  const double dt_hap      = 1.0 / control_freq;        // JY: derived period (s); round() lives on the usleep side
+
+  while (true) {
+    {
+      std::lock_guard<std::mutex> lock(_ctrl_mtx);
+      if (!_ctrl_flag_running) break;
+    }
+
+    Touch::TouchState state;
+    _touch_ptr->getState(state);
+    bool btn1 = (state.buttons & HD_DEVICE_BUTTON_1) != 0;
+    bool btn2 = (state.buttons & HD_DEVICE_BUTTON_2) != 0;
+
+    // JY: check _ctrl_flag_saving transitions driven by R key in main.cc
+    {
+      bool saving_now;
+      {
+        std::lock_guard<std::mutex> lock(_ctrl_mtx);
+        saving_now = _ctrl_flag_saving;
+      }
+      if (saving_now && !saving_was_active) {
+        _state_teleop_seq_id = 0;
+        json_file_start(_ctrl_teleop_data_stream);
+        save_teleop_data_json(_ctrl_teleop_data_stream, _state_teleop_seq_id++,
+                              get_timestamp_now_ms(), (int)btn1, (int)btn2, (int)amplify_mode);
+        json_frame_ending(_ctrl_teleop_data_stream);
+        _state_teleop_thread_saving = true;
+      } else if (!saving_now && saving_was_active) {
+        save_teleop_data_json(_ctrl_teleop_data_stream, _state_teleop_seq_id++,
+                              get_timestamp_now_ms(), (int)btn1, (int)btn2, (int)amplify_mode);
+        json_file_ending(_ctrl_teleop_data_stream);
+        _ctrl_teleop_data_stream.close();
+        _state_teleop_thread_saving = false;
+      }
+      saving_was_active = saving_now;
+    }
+
+    // JY: check Enter key start request from main.cc — only activates, never deactivates
+    if (!teleop_active_local) {
+      bool start_req = false;
+      {
+        std::lock_guard<std::mutex> lock(_ctrl_mtx);
+        if (_teleop_start_requested) {
+          _teleop_start_requested = false;
+          start_req = true;
+        }
+      }
+      if (start_req) {
+        ref_x = state.position[0] / 1000.0;
+        ref_y = state.position[1] / 1000.0;
+        ref_z = state.position[2] / 1000.0;
+        ref_gimbals[0] = state.gimbal_angles[0];
+        ref_gimbals[1] = state.gimbal_angles[1];
+        ref_gimbals[2] = state.gimbal_angles[2];
+        // JY: tare from mean of last 100 wrench readings
+        if (_config.run_wrench_thread) {
+          Eigen::MatrixXd w = get_wrench(100, 0);
+          for (int i = 0; i < 3; i++)
+            hap_wrench_offset[i] = w.row(i).mean();
+          if (_config.haptic_gravity.norm() > 0.0) {
+            RUT::Vector7d tare_pose;
+            {
+              std::lock_guard<std::mutex> lock(_poses_fb_mtxs[0]);
+              tare_pose = _poses_fb[0];
+            }
+            Eigen::Matrix3d R_tare =
+                RUT::quat2SO3(tare_pose[3], tare_pose[4], tare_pose[5], tare_pose[6]);
+            GinF_tare = R_tare.transpose() * _config.haptic_gravity;
+          }
+        }
+        f_filt.setZero();
+        f_cmd_prev.setZero();
+        hap_ramp = 0.0;
+        for (int i = 0; i < 3; i++) hap_eq_pos[i] = state.position[i];
+        for (int i = 0; i < 3; i++) k_prev[i] = 0.0;
+        if (!_config.mock_hardware)
+          robot_ptrs[0]->getCartesian(robot_initial_pose);
+        else
+          robot_initial_pose << 0, 0, 0, 1, 0, 0, 0;
+        q_robot_initial = Eigen::Quaterniond(
+            robot_initial_pose[3], robot_initial_pose[4],
+            robot_initial_pose[5], robot_initial_pose[6]);
+        q_prev = q_robot_initial;
+        amplify_mode = false;
+        {
+          std::lock_guard<std::mutex> lock(_ctrl_mtx);
+          _teleop_active = true;
+        }
+        teleop_active_local = true;
+        was_btn1 = btn1;  // JY: seed so held buttons don't fire as rising edges immediately
+        was_btn2 = btn2;
+        std::cout << header << "Teleop activated.\n";
+      }
+      if (!teleop_active_local) {
+        was_btn1 = btn1;
+        was_btn2 = btn2;
+        usleep(5000);  // 200 Hz
+        continue;
+      }
+    }
+
+    // ── Active: Button 1 + Button 2 together -> deactivate ───────────────
+    if (btn1 && btn2) {
+      {
+        std::lock_guard<std::mutex> lock(_ctrl_mtx);
+        _teleop_active = false;
+      }
+      teleop_active_local = false;
+      amplify_mode = false;
+      {
+        std::lock_guard<std::mutex> lock(_ctrl_mtx);
+        _amplify_mode = false;  // JY
+        _idle_mode    = false;  // JY
+      }
+      set_high_level_maintain_position();
+      _touch_ptr->disableForce();
+      std::cout << header << "Teleop deactivated.\n";
+
+      // Wait for both buttons to be fully released before returning to idle
+      // so the next Enter press does not re-trigger immediately from stale state.
+      bool should_exit = false;
+      while (true) {
+        {
+          std::lock_guard<std::mutex> lock(_ctrl_mtx);
+          if (!_ctrl_flag_running) { should_exit = true; break; }
+        }
+        _touch_ptr->getState(state);
+        if (!((state.buttons & HD_DEVICE_BUTTON_1) != 0) &&
+            !((state.buttons & HD_DEVICE_BUTTON_2) != 0))
+          break;
+        usleep(5000);
+      }
+      if (should_exit) break;
+
+      was_btn1 = false;
+      was_btn2 = false;
+      usleep(5000);
+      continue;
+    }
+
+    // ── Button 1 rising edge -> enter amplify mode ────────────────────────
+    // JY: moved from Button 2; same re-reference logic
+    if (btn1 && !was_btn1) {
+      if (!_config.mock_hardware)
+        robot_ptrs[0]->getCartesian(robot_initial_pose);
+      ref_x = state.position[0] / 1000.0;
+      ref_y = state.position[1] / 1000.0;
+      ref_z = state.position[2] / 1000.0;
+      ref_gimbals[0] = state.gimbal_angles[0];
+      ref_gimbals[1] = state.gimbal_angles[1];
+      ref_gimbals[2] = state.gimbal_angles[2];
+      q_robot_initial = Eigen::Quaterniond(
+          robot_initial_pose[3], robot_initial_pose[4],
+          robot_initial_pose[5], robot_initial_pose[6]);
+      q_prev = q_robot_initial;
+      amplify_mode = true;
+      { std::lock_guard<std::mutex> lock(_ctrl_mtx); _amplify_mode = true; }  // JY
+      if (_state_teleop_thread_saving) {  // JY: log if recording active
+        save_teleop_data_json(_ctrl_teleop_data_stream, _state_teleop_seq_id++,
+                              get_timestamp_now_ms(), 1, (int)btn2, 1);
+        json_frame_ending(_ctrl_teleop_data_stream);
+      }
+      std::cout << header << "Amplify mode ON.\n";
+    }
+    // ── Button 1 falling edge -> exit amplify, re-reference ────────────────
+    // JY: same re-reference on exit so normal mode resumes with zero displacement
+    else if (!btn1 && was_btn1 && amplify_mode) {
+      if (!_config.mock_hardware)
+        robot_ptrs[0]->getCartesian(robot_initial_pose);
+      ref_x = state.position[0] / 1000.0;
+      ref_y = state.position[1] / 1000.0;
+      ref_z = state.position[2] / 1000.0;
+      ref_gimbals[0] = state.gimbal_angles[0];
+      ref_gimbals[1] = state.gimbal_angles[1];
+      ref_gimbals[2] = state.gimbal_angles[2];
+      q_robot_initial = Eigen::Quaterniond(
+          robot_initial_pose[3], robot_initial_pose[4],
+          robot_initial_pose[5], robot_initial_pose[6]);
+      q_prev = q_robot_initial;
+      amplify_mode = false;
+      { std::lock_guard<std::mutex> lock(_ctrl_mtx); _amplify_mode = false; }  // JY
+      if (_state_teleop_thread_saving) {  // JY: log if recording active
+        save_teleop_data_json(_ctrl_teleop_data_stream, _state_teleop_seq_id++,
+                              get_timestamp_now_ms(), 0, (int)btn2, 0);
+        json_frame_ending(_ctrl_teleop_data_stream);
+      }
+      std::cout << header << "Amplify mode OFF. Re-referenced.\n";
+    }
+
+    // ── Button 2 held -> idle mode (robot ignores Touch position) ──────────
+    // JY: on falling edge re-reference so resuming does not cause a position jump
+    if (btn2 && !was_btn2) {
+      { std::lock_guard<std::mutex> lock(_ctrl_mtx); _idle_mode = true; }  // JY
+      if (_config.run_wrench_thread) {  // JY: zero haptic force immediately on idle entry — Touch holds last commanded force otherwise
+        double zero_f[3] = {0.0, 0.0, 0.0};
+        _touch_ptr->setForce(zero_f);
+      }
+      std::cout << header << "Idle mode ON.\n";
+    } else if (!btn2 && was_btn2) {
+      { std::lock_guard<std::mutex> lock(_ctrl_mtx); _idle_mode = false; }  // JY
+      if (!_config.mock_hardware)
+        robot_ptrs[0]->getCartesian(robot_initial_pose);
+      ref_x = state.position[0] / 1000.0;
+      ref_y = state.position[1] / 1000.0;
+      ref_z = state.position[2] / 1000.0;
+      ref_gimbals[0] = state.gimbal_angles[0];
+      ref_gimbals[1] = state.gimbal_angles[1];
+      ref_gimbals[2] = state.gimbal_angles[2];
+      q_robot_initial = Eigen::Quaterniond(
+          robot_initial_pose[3], robot_initial_pose[4],
+          robot_initial_pose[5], robot_initial_pose[6]);
+      q_prev = q_robot_initial;
+      for (int i = 0; i < 3; i++) hap_eq_pos[i] = state.position[i];  // JY: reset spring eq to current Touch pos on idle exit
+      for (int i = 0; i < 3; i++) k_prev[i] = 0.0;  // JY: reset stiffness slew so force ramps up from zero on idle exit
+      f_filt.setZero();  // JY: clear IIR filter state accumulated before idle
+      hap_ramp = 0.0;    // JY: reset contact ramp so force builds up gradually on idle exit
+      std::cout << header << "Idle mode OFF. Re-referenced.\n";
+    }
+    if (btn2) {  // JY: skip position and haptic while idle
+      was_btn1 = btn1;
+      was_btn2 = btn2;
+      usleep(static_cast<useconds_t>(std::round(dt_hap * 1.0e6)));
+      continue;
+    }
+
+    // JY: Orientation via gimbal angles — matches MAA_data_collection_v2.py exactly.
+    // Previous approach (quaternion delta from HD_CURRENT_TRANSFORM) had no axis
+    // remapping and used a different data source, causing wrong rotation directions.
+    const double orientation_scale = _touch_config.orientation_scale;  // JY: from touch.orientation_scale in YAML
+    double j_rel[3] = {
+        orientation_scale * (state.gimbal_angles[0] - ref_gimbals[0]),
+        orientation_scale * (state.gimbal_angles[1] - ref_gimbals[1]),
+        orientation_scale * (state.gimbal_angles[2] - ref_gimbals[2])
+    };
+    // hd_j_rel[[0,1]] = -hd_j_rel[[1,0]]: swap axes 0 & 1 and negate both
+    double tmp0 = j_rel[0], tmp1 = j_rel[1];
+    j_rel[0] = -tmp1;
+    j_rel[1] = -tmp0;
+    // Intrinsic XYZ Euler -> rotation (matches scipy R.from_euler('xyz', ...))
+    Eigen::Matrix3d hd_R_rel =
+        (Eigen::AngleAxisd(j_rel[0], Eigen::Vector3d::UnitX()) *
+         Eigen::AngleAxisd(j_rel[1], Eigen::Vector3d::UnitY()) *
+         Eigen::AngleAxisd(j_rel[2], Eigen::Vector3d::UnitZ())).toRotationMatrix();
+    Eigen::Quaterniond q_new =
+        (q_robot_initial * Eigen::Quaterniond(hd_R_rel)).normalized();
+    if (q_prev.dot(q_new) < 0) q_new.coeffs() = -q_new.coeffs();
+    q_prev = q_new;
+
+    // ── Position ──────────────────────────────────────────────────────────
+    RUT::Vector7d target_pose = robot_initial_pose;
+
+    // JY: both modes use the same references; amplify just applies amp_scale_multiplier on top
+    {
+      double scale = _touch_config.pos_scale *
+                     (amplify_mode ? _touch_config.amp_scale_multiplier : 1.0);  // JY
+      double px = scale * (state.position[0] / 1000.0 - ref_x);
+      double py = scale * (state.position[1] / 1000.0 - ref_y);
+      double pz = scale * (state.position[2] / 1000.0 - ref_z);
+      Eigen::Vector3d pos_corrected = hd2rob_R * Eigen::Vector3d(px, py, pz);
+      target_pose[0] = -pos_corrected[0] + robot_initial_pose[0];
+      target_pose[1] = -pos_corrected[1] + robot_initial_pose[1];
+      target_pose[2] =  pos_corrected[2] + robot_initial_pose[2];
+    }
+
+    target_pose[3] = q_new.w();
+    target_pose[4] = q_new.x();
+    target_pose[5] = q_new.y();
+    target_pose[6] = q_new.z();
+
+    set_target_pose(target_pose, 5.0, 0);  // 5 ms lookahead
+
+    // JY: haptic force feedback — force-dependent spring-damper on Touch device
+    if (_config.run_wrench_thread) {
+      // JY: median of last 3 wrench readings; guard against empty buffer
+      Eigen::Vector3d haptic_raw = Eigen::Vector3d::Zero();
+      {
+        Eigen::MatrixXd w = get_wrench(3, 0);
+        if (w.rows() >= 6 && w.cols() >= 2) {  // JY: need >=2 cols for nth_element median
+          for (int i = 0; i < 3; i++) {
+            Eigen::VectorXd row = w.row(i);
+            std::nth_element(row.data(), row.data() + 1, row.data() + row.size());
+            haptic_raw[i] = row[1];
+          }
+        }
+      }
+      Eigen::Vector3d delta_f = haptic_raw - hap_wrench_offset;  // JY: tare-subtracted contact force
+
+      // JY: cancel gravity drift when robot orientation changes after tare. Possibly remove this because it might be unnecessary
+      if (_config.haptic_gravity.norm() > 0.0) {
+        RUT::Vector7d cur_pose;
+        {
+          std::lock_guard<std::mutex> lock(_poses_fb_mtxs[0]);
+          cur_pose = _poses_fb[0];
+        }
+        Eigen::Matrix3d R_now =
+            RUT::quat2SO3(cur_pose[3], cur_pose[4], cur_pose[5], cur_pose[6]);
+        Eigen::Vector3d GinF_now = R_now.transpose() * _config.haptic_gravity;
+        delta_f += (GinF_now - GinF_tare);
+      }
+
+      // JY: optional filtering — kept for reference, disabled by default (haptic_filtering_enabled: false)
+      if (_config.haptic_filtering_enabled) {
+        // Deadband: zero any axis below threshold
+        for (int i = 0; i < 3; i++)
+          if (std::abs(delta_f[i]) < _config.haptic_deadband) delta_f[i] = 0.0;
+
+        // Contact ramp: soft-start (ramp_up_time) / soft-stop (ramp_down_time)
+        bool in_contact = (delta_f.norm() > _config.haptic_contact_th);
+        double target_ramp = in_contact ? 1.0 : 0.0;
+        double tau = std::max(1e-3, (target_ramp > hap_ramp)
+                                    ? _config.haptic_ramp_up_time
+                                    : _config.haptic_ramp_down_time);
+        hap_ramp += std::min(1.0, dt_hap / tau) * (target_ramp - hap_ramp);
+        delta_f *= hap_ramp;
+
+        // 1st-order IIR lowpass: y = y_prev + a*(x - y_prev), a = dt/(rc+dt)
+        const double rc = 1.0 / (2.0 * M_PI * _config.haptic_iir_cutoff_hz);
+        const double a  = dt_hap / (rc + dt_hap);
+        f_filt += a * (delta_f - f_filt);
+      } else {
+        f_filt = delta_f;
+      }
+
+      // JY: axis remap — robot [X,Y,Z] → Touch device axes [0,1,2]
+      // Matches the original directionality: Fx → axis 0, -Fz*z_mult → axis 1, Fy → axis 2
+      double f_touch[3] = {
+        f_filt[0],
+        -f_filt[2] * _config.haptic_z_multiplier,
+        f_filt[1]
+      };
+
+      // JY: freeze spring equilibrium globally when any contact force crosses threshold;
+      //     below threshold, equilibrium tracks hand so spring produces zero displacement.
+      double contact_norm = f_filt.norm();
+      if (contact_norm < _config.haptic_contact_th) {
+        for (int i = 0; i < 3; i++) hap_eq_pos[i] = state.position[i];
+      }
+
+      // JY: per-axis directional spring-damper — stiffness and damping on each Touch axis
+      //     scale with the contact force in that axis after remap, so only the axes where
+      //     the robot actually feels force become stiff/damped.
+      double f_spring[3];
+      for (int i = 0; i < 3; i++) {
+        double k_target = std::min(std::abs(f_touch[i]) * _config.haptic_k_per_N,
+                                   _touch_ptr->getMaxStiffness());  // JY: N/mm, unclamped target
+        // JY: slew-rate limit on stiffness rise only — prevents abrupt force jump when contact is made;
+        //     stiffness is allowed to drop instantly so the device feels free immediately on release.
+        double k_i = std::min(k_target, k_prev[i] + _config.haptic_k_slew_rate * dt_hap);  // JY: N/mm
+        k_prev[i] = k_i;  // JY: save for next step
+        double b_i = std::min(std::abs(f_touch[i]) * _config.haptic_b_per_N,
+                              _touch_ptr->getMaxDamping());    // JY: N·s/mm
+        f_spring[i] = -k_i * (state.position[i] - hap_eq_pos[i]) - b_i * state.velocity[i]; //MAA: equation for stiffness
+        f_spring[i] = std::clamp(f_spring[i], -_config.haptic_f_max, _config.haptic_f_max);
+      }
+      // std::cout << header << "f_touch = [" << f_touch[0] << ", " << f_touch[1] << ", " << f_touch[2]
+      //           << "] N, f_spring = [" << f_spring[0] << ", " << f_spring[1] << ", " << f_spring[2]
+      //           << "] N\n";
+      _touch_ptr->setForce(f_spring);
+    }
+
+    was_btn1 = btn1;
+    was_btn2 = btn2;
+    usleep(static_cast<useconds_t>(std::round(dt_hap * 1.0e6)));  // JY: sleep derived from dt_hap so loop rate stays consistent with dt used in slew/ramp calculations
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(_ctrl_mtx);
+    _teleop_active = false;
+  }
+  // JY: if teleop was still active when loop exited (e.g. q pressed mid-session), stop robot cleanly
+  if (teleop_active_local) set_high_level_maintain_position();
+  // JY: if loop exits while recording was still active, close stream cleanly
+  if (_state_teleop_thread_saving) {
+    save_teleop_data_json(_ctrl_teleop_data_stream, _state_teleop_seq_id++,
+                          get_timestamp_now_ms(), 0, 0, 0);
+    json_file_ending(_ctrl_teleop_data_stream);
+    _ctrl_teleop_data_stream.close();
+    _state_teleop_thread_saving = false;
+  }
+  stop_saving_data();  // JY: signal other threads to stop saving if still active
+  if (_touch_ptr) _touch_ptr->disableForce();
   std::cout << header << "Joined." << std::endl;
 }

@@ -16,6 +16,10 @@
 #include <RobotUtilities/spatial_utilities.h>
 #include <RobotUtilities/timer_linux.h>
 
+#include <Leptrino_ft.h>  //MAA
+#include <Leptrino_driver.h>
+#include <touch/touch.h>  // JY
+
 #include <force_control/admittance_controller.h>
 #include <force_control/config_deserialize.h>
 #include <hardware_interfaces/js_interfaces.h>
@@ -23,10 +27,10 @@
 #include <hardware_interfaces/types.h>
 // hardware used in this app
 #include <ati_netft/ati_netft.h>
-#include <coinft/coin_ft.h>
+// #include <coinft/coin_ft.h>  // disabled: onnxruntime not installed
 #include <gopro/gopro.h>
-#include <oak/oak.h>
-// #include <realsense/realsense.h>
+// #include <oak/oak.h>  // disabled: OAK library not built
+#include <realsense/realsense.h>
 #include <robotiq_ft_modbus/robotiq_ft_modbus.h>
 #include <table_top_manip/perturbation_generator.h>
 #include <ur_rtde/ur_rtde.h>
@@ -41,6 +45,22 @@ struct ManipServerConfig {
   bool run_wrench_thread{false};
   bool run_rgb_thread{false};
   bool run_key_thread{false};
+  bool run_teleop_thread{false};  // JY: also controls Touch device init
+  // JY: haptic force feedback parameters (ported from MAA_data_collection_v2.py)
+  bool   haptic_filtering_enabled{false}; // JY: gates deadband/ramp/IIR/slew; kept for reference, disabled by default
+  double haptic_deadband{0.30};       // N, per-axis deadband to prevent buzzing
+  double haptic_contact_th{0.60};     // N, contact threshold — also freezes spring equilibrium above this
+  double haptic_ramp_up_time{0.15};   // s, soft-start time constant
+  double haptic_ramp_down_time{0.70}; // s, soft-stop time constant
+  double haptic_iir_cutoff_hz{18.0};  // Hz, 1st-order IIR lowpass cutoff
+  double haptic_z_multiplier{1.5};    // dimensionless, extra Z-axis scale in remap
+  double haptic_f_max{3.0};           // N, per-axis hard saturation on spring-damper output
+  // JY: gravity vector used to cancel orientation-induced wrench drift after tare
+  Eigen::Vector3d haptic_gravity{0.0, 0.0, 0.0};
+  // JY: force-dependent spring-damper gains (replace fixed haptic_stiffness/damping in TouchConfig)
+  double haptic_k_per_N{0.02};        // JY: N/mm per N of contact force (stiffness gain)
+  double haptic_b_per_N{0.0002};      // JY: N·s/mm per N of contact force (damping gain)
+  double haptic_k_slew_rate{0.5};     // JY: N/mm/s max rise rate for stiffness (limits abrupt jump on contact)
   bool plot_rgb{false};
   int rgb_buffer_size{5};
   int robot_buffer_size{100};
@@ -48,6 +68,7 @@ struct ManipServerConfig {
   int wrench_buffer_size{100};
   bool mock_hardware{false};
   bool bimanual{false};
+  int cam_count{1}; //MAA: added this
   bool use_perturbation_generator{false};
   CameraSelection camera_selection{CameraSelection::NONE};
   ForceSensingMode force_sensing_mode{ForceSensingMode::NONE};
@@ -80,6 +101,7 @@ struct ManipServerConfig {
       wrench_buffer_size = node["wrench_buffer_size"].as<int>();
       mock_hardware = node["mock_hardware"].as<bool>();
       bimanual = node["bimanual"].as<bool>();
+      cam_count = node["cam_count"].as<int>(); //MAA: added this
       use_perturbation_generator =
           node["use_perturbation_generator"].as<bool>();
       camera_selection = string_to_enum<CameraSelection>(
@@ -103,6 +125,27 @@ struct ManipServerConfig {
       }
       if (node["take_over_mode"]) {
         take_over_mode = node["take_over_mode"].as<bool>();
+      }
+      if (node["run_teleop_thread"]) {  // JY
+        run_teleop_thread = node["run_teleop_thread"].as<bool>();
+      }
+      // JY: teleop_vel and haptic parameters now live under touch: in the YAML
+      if (node["touch"]) {
+        const YAML::Node& t = node["touch"];
+        // JY: haptic force feedback parameters
+        if (t["haptic_filtering_enabled"]) haptic_filtering_enabled = t["haptic_filtering_enabled"].as<bool>();
+        if (t["haptic_deadband"])       haptic_deadband       = t["haptic_deadband"].as<double>();
+        if (t["haptic_contact_th"])     haptic_contact_th     = t["haptic_contact_th"].as<double>();
+        if (t["haptic_ramp_up_time"])   haptic_ramp_up_time   = t["haptic_ramp_up_time"].as<double>();
+        if (t["haptic_ramp_down_time"]) haptic_ramp_down_time = t["haptic_ramp_down_time"].as<double>();
+        if (t["haptic_iir_cutoff_hz"])  haptic_iir_cutoff_hz  = t["haptic_iir_cutoff_hz"].as<double>();
+        if (t["haptic_z_multiplier"])   haptic_z_multiplier   = t["haptic_z_multiplier"].as<double>();
+        if (t["haptic_f_max"])          haptic_f_max          = t["haptic_f_max"].as<double>();
+        if (t["haptic_gravity"])  // JY: gravity vector for haptic drift correction
+          haptic_gravity = RUT::deserialize_vector<Eigen::Vector3d>(t["haptic_gravity"]);
+        if (t["haptic_k_per_N"])       haptic_k_per_N       = t["haptic_k_per_N"].as<double>();       // JY: stiffness gain
+        if (t["haptic_b_per_N"])       haptic_b_per_N       = t["haptic_b_per_N"].as<double>();       // JY: damping gain
+        if (t["haptic_k_slew_rate"])   haptic_k_slew_rate   = t["haptic_k_slew_rate"].as<double>();   // JY: stiffness rise rate limit
       }
       if (node["pose7_offset_TC"]) {
         pose7_offset_TC =
@@ -184,6 +227,7 @@ class ManipServer {
   void set_force_controlled_axis(const RUT::Matrix6d& Tr, int n_af,
                                  int robot_id = 0);
   void set_stiffness_matrix(const RUT::Matrix6d& stiffness, int robot_id = 0);
+  void set_damping_matrix(const RUT::Matrix6d& damping, int robot_id = 0);
 
   void schedule_waypoints(const Eigen::MatrixXd& waypoints,
                           const Eigen::VectorXd& timepoints_ms,
@@ -213,6 +257,11 @@ class ManipServer {
   bool is_saving_data();
   std::string get_episode_folder() const;
 
+  bool is_teleop_active();      // JY
+  bool is_amplify_mode();       // JY
+  bool is_idle_mode();          // JY
+  void request_teleop_start();  // JY: called by main() on Enter key to start teleop
+
  private:
   // config
   ManipServerConfig _config;
@@ -226,6 +275,7 @@ class ManipServer {
 
   // list of id
   std::vector<int> _id_list;
+  std::vector<int> _cam_id_list; //MAA: added this
 
   // data buffers
   std::vector<RUT::DataBuffer<Eigen::MatrixXd>> _camera_rgb_buffers;
@@ -290,6 +340,8 @@ class ManipServer {
   std::vector<std::shared_ptr<FTInterfaces>> force_sensor_ptrs;
   std::vector<std::shared_ptr<RobotInterfaces>> robot_ptrs;
   std::vector<std::shared_ptr<JSInterfaces>> eoat_ptrs;
+  std::shared_ptr<Touch> _touch_ptr;  // JY
+  Touch::TouchConfig _touch_config;   // JY: stored so teleop_loop can read it
 
   // controllers
   std::vector<AdmittanceController> _controllers;
@@ -306,6 +358,7 @@ class ManipServer {
   std::vector<std::thread> _rgb_threads;
   std::thread _rgb_plot_thread;
   std::thread _key_thread;
+  std::thread _teleop_thread;  // JY
 
   // control variables to control the threads
   std::string _episode_folder;
@@ -314,6 +367,7 @@ class ManipServer {
   std::vector<std::ofstream> _ctrl_eoat_data_streams;
   std::vector<std::ofstream> _ctrl_wrench_data_streams;
   std::ofstream _ctrl_key_data_stream;
+  std::ofstream _ctrl_teleop_data_stream;  // JY
   bool _ctrl_flag_running = false;  // flag to terminate the program
   bool _ctrl_flag_saving = false;   // flag for ongoing data collection
   std::mutex _ctrl_mtx;
@@ -327,18 +381,25 @@ class ManipServer {
   std::vector<bool> _states_wrench_thread_ready{};
   bool _state_plot_thread_ready{false};
   bool _state_key_thread_ready{false};
+  bool _state_teleop_thread_ready{false};   // JY
+  bool _teleop_active{false};               // JY
+  bool _teleop_start_requested{false};      // JY: set by main() on Enter key, consumed by teleop_loop
+  bool _amplify_mode{false};               // JY: mirrors teleop_loop local, read by GUI
+  bool _idle_mode{false};                  // JY: mirrors teleop_loop local, read by GUI
 
   std::vector<bool> _states_robot_thread_saving{};
   std::vector<bool> _states_eoat_thread_saving{};
   std::vector<bool> _states_rgb_thread_saving{};
   std::vector<bool> _states_wrench_thread_saving{};
   bool _state_key_thread_saving{false};
+  bool _state_teleop_thread_saving{false};  // JY
 
   std::vector<int> _states_robot_seq_id{};
   std::vector<int> _states_eoat_seq_id{};
   std::vector<int> _states_rgb_seq_id{};
   std::vector<int> _states_wrench_seq_id{};
   int _state_key_seq_id{0};
+  int _state_teleop_seq_id{0};  // JY
 
   // shared variables between camera thread and plot thread
   std::vector<cv::Mat> _color_mats;
@@ -369,4 +430,5 @@ class ManipServer {
                    int sensor_id);
   void rgb_plot_loop();  // opencv plotting does not support multi-threading
   void key_loop(const RUT::TimePoint& time0);
+  void teleop_loop(const RUT::TimePoint& time0);  // JY
 };

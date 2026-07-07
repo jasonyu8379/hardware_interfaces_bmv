@@ -1,7 +1,8 @@
-use_ati: true
+use_ati: false
+use_leptrino: true
 
 ur_rtde:
-  robot_ip: "192.168.2.105"
+  robot_ip: "192.168.137.1"
   rtde_frequency: 500.0
   rt_receive_priority: 90
   rt_control_priority: 85
@@ -14,82 +15,37 @@ ur_rtde:
     zone_safety_mode: "SAFETY_MODE_TRUNCATE"
     incre_safety_mode: "SAFETY_MODE_STOP"
     operation_mode: "OPERATION_MODE_CARTESIAN"
-    max_incre_m: 0.01
+    max_incre_m: 0.02
     max_incre_rad: 0.0628
     max_incre_joint_rad: 0.0628
-    safe_zone: [-0.5, 0.7, -0.05, 0.9, 0.2, 0.8]
+    safe_zone: [-0.75, 0.75, -0.85, 0.50, 0.015, 0.75] #[xmin,xmax,ymin,ymax,zmin,zmax]
 
-# ur_rtde:
-#   robot_ip: "192.168.2.106"
-#   rtde_frequency: 500.0
-#   rt_receive_priority: 90
-#   rt_control_priority: 85
-#   interface_priority: 80
-#   linear_vel: 0.5
-#   linear_acc: 0.5
-#   servoL_lookahead_time: 0.1
-#   servoL_gain: 600
-#   robot_interface_config:
-#     zone_safety_mode: "SAFETY_MODE_TRUNCATE"
-#     incre_safety_mode: "SAFETY_MODE_STOP"
-#     operation_mode: "OPERATION_MODE_CARTESIAN"
-#     max_incre_m: 0.02
-#     max_incre_rad: 0.0628
-#     max_incre_joint_rad: 0.0628
-#     safe_zone: [-0.5, 0.7, -0.9, 0.05, 0.2, 0.8]
-
-robotiq_ft_modbus:
-  sensor_name: "RobotiqFTModbus"
-  fullpath: ""
-  print_flag: false
-  publish_rate: 100.0
-  noise_level: 0.0
-  stall_threshold: 50
-  Foffset: [0.0, 0.0, 0.0]
-  Toffset: [0.0, 0.0, 0.0]
-  Gravity: [0.0, 0.0, 0.0]
-  Pcom: [0.0, 0.0, 0.0]
-  WrenchSafety: [80.0, 80.0, 100.0, 5, 5, 5]
-  PoseSensorTool: [0.0, 0.0, -0.035, 0.70710678, 0., 0. , -0.70710678] # tail on the left
-
-
-ati_netft:
-    ip_address: "192.168.2.101"
-    # ip_address: "192.168.2.102"
-    # counts per force and torque are found from 'configuration' tab in the ati web interface.
+leptrino0:
+    #ip_address: "192.168.2.101"
     counts_per_force: 1000000
     counts_per_torque: 1000000
-    sensor_name: "netft"
+    sensor_name: "leptrino0"
     print_flag: false
-    fullpath: "/tmp/netft_data.txt"
+    fullpath: "/tmp/netft0_data.txt"
     publish_rate: 1000
-    # If the force change is smaller than noise_level for more than stall_threshold frames,
-    # the stream is considered dead.
     noise_level: 0.0
-    stall_threshold: 50
+    stall_threshold: 100
     Foffset: [0.0, 0.0, 0.0]
     Toffset: [0.0, 0.0, 0.0]
     Gravity: [0.0, 0.0, 0.0]
     Pcom: [0.0, 0.0, 0.0]
-    WrenchSafety: [80.0, 80.0, 100.0, 4, 4, 4]
-    # PoseSensorTool: [0.00, 0, -0.045, 0.7071, 0., 0., 0.7071] # new blade, assuming tcp is at 50mm
-    PoseSensorTool: [0.00, 0, -0.005, 0.7071, 0., 0., 0.7071] # new blade, assuming tcp is at 50mm
-
+    WrenchSafety: [150.0, 150.0, 150.0, 3.0, 3.0, 3.0]
+    PoseSensorTool: [0.0, 0.0, -0.144, 1.0, 0.0, 0.0, 0.0 ] #MAA [x, y, z, qw, qx, qy, qz], this is a transformation from sensor to the robot frame
+    # PoseSensorTool: [0.0, 0.0, -0.089, 1.0, 0.0, 0.0, 0.0 ] #MAA [x, y, z, qw, qx, qy, qz], this is a transformation from sensor to the robot frame
 
 admittance_controller:
   dt: 0.002
   log_to_file: false
   log_file_path: "/tmp/admittance_controller.log"
-  alert_overrun: false
   compliance6d:
-    stiffness: [1, 1, 1, 0.1, 0.1, 0.1] # [100, 100, 100, 1, 1, 1] 
-    # damping: [1.6, 1.6, 1.6, 0.03, 0.03, 0.03]
-    damping: [4, 4, 4, 0.2, 0.2, 0.2]
-    # inertia: [0.1, 0.1, 0.1, 0.001, 0.001, 0.001]
-    inertia: [1, 1, 1, 0.02, 0.02, 0.02] # wsg
-    stiction: [5, 5, 5, 0, 0, 0]
-  max_spring_force_magnitude: 20
-  max_spring_torque_magnitude: 2
+    stiffness: [30, 30, 30, 2, 2, 2]
+    damping: [1.5, 1.5, 1.5, 0.1, 0.1, 0.1]
+    inertia: [0.1, 0.1, 0.1, 0.0005, 0.0005, 0.0005]
   direct_force_control_gains:
     P_trans: 0
     I_trans: 0
@@ -98,3 +54,4 @@ admittance_controller:
     I_rot: 0
     D_rot: 0
   direct_force_control_I_limit: [0, 0, 0, 0, 0, 0]
+  max_spring_force_magnitude: 20

@@ -2,9 +2,10 @@ cmake_minimum_required(VERSION 3.5)
 #######################
 project(force_control_demo)
 
+#find_package(yaml-cpp REQUIRED)
+
 include_directories(
   include/
-  yaml-cpp
   ${EIGEN3_INCLUDE_DIRS}
 )
 

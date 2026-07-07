@@ -6,7 +6,6 @@ find_package(Boost REQUIRED)
 
 include_directories(
   include/
-  yaml-cpp
   ${Boost_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIRS}
 )
@@ -15,8 +14,9 @@ add_executable(ft_calibration src/main.cc)
 target_link_libraries(ft_calibration
   HI_COMMON
   UR_RTDE
-  #ROBOTIQ_FT_HW
-  #ATI_NETFT
+  ROBOTIQ_FT_HW
+  ATI_NETFT
+  LEPTRINO
   ${RUT}
   ${FORCE_CONTROLLERS}
   ${YAMLLib}

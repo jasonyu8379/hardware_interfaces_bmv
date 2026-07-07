@@ -1,0 +1,117 @@
+# Inference
+#    plot_rgb: false
+#    damping: high damping
+#    max_spring_force_magnitude: 50
+# Data collection:
+#    plot_rgb: true
+#    damping: low damping
+#    max_spring_force_magnitude: 15
+# always check the first few parameters:
+data_folder: "/home/bmv/extra_storage/data/real/HT_typodont_approach_multicam"
+mock_hardware: false
+bimanual: false
+
+run_robot_thread: true
+run_wrench_thread: true
+run_rgb_thread: true
+plot_rgb: false
+
+rgb_buffer_size: 100
+pose_buffer_size: 200
+wrench_buffer_size: 2000
+camera_selection: "REALSENSE"
+force_sensing_mode: "FORCE_MODE_LEPTRINO"
+low_damping: [1.0, 1.0, 1.0, 0.1, 0.1, 0.1]
+output_rgb_hw: [224, 224]
+
+cam_count: 3
+ur_rtde0:
+  robot_ip: "192.168.137.1"
+  rtde_frequency: 500.0
+  rt_receive_priority: 90
+  rt_control_priority: 85
+  interface_priority: 80
+  linear_vel: 0.5
+  linear_acc: 0.5
+  servoL_lookahead_time: 0.1
+  servoL_gain: 600
+  robot_interface_config:
+    zone_safety_mode: "SAFETY_MODE_TRUNCATE"
+    incre_safety_mode: "SAFETY_MODE_STOP"
+    operation_mode: "OPERATION_MODE_CARTESIAN"
+    max_incre_m: 0.03
+    max_incre_rad: 0.2
+    max_incre_joint_rad: 0.0628
+    safe_zone: [-0.75, 0.75, -0.85, 0.50, 0.015, 0.75] #[xmin,xmax,ymin,ymax,zmin,zmax]
+
+leptrino0:
+    #ip_address: "192.168.2.101"
+    counts_per_force: 1000000
+    counts_per_torque: 1000000
+    sensor_name: "leptrino0"
+    print_flag: false
+    fullpath: "/tmp/netft0_data.txt"
+    publish_rate: 1000
+    noise_level: 0.0
+    stall_threshold: 100
+    Foffset: [-1.370, -0.668, 0.663]
+    Toffset: [0.080, -0.180, 0.002]
+    Gravity: [-0.245, 0.150, -1.555]
+    Pcom: [0.042, -0.004, 0.130]
+    WrenchSafety: [150.0, 150.0, 150.0, 3.0, 3.0, 3.0]
+    PoseSensorTool: [0.0, 0.0, -0.144, 1.0, 0.0, 0.0, 0.0  ] #MAA [x, y, z, qw, qx, qy, qz], this is a transformation from sensor to the robot frame
+    # PoseSensorTool:  [0.0, 0.0, -0.089, 1.0, 0.0, 0.0, 0.0 ] #MAA: [x, y, z, qw, qx, qy, qz]
+
+# Realsense serials:
+# 938422075962 - realsense D435i
+# 936322071211 - realsense D435i
+# 127122270237 - realsense D405
+# 128422271715 - realsense D405
+realsense0:
+  width: 424 #640 #1280
+  height: 240 #480 #720
+  framerate: 60
+  enable_color: true
+  enable_depth: false
+  # align_depth_to_color: false
+  serial_number: "936322071211"
+  manual_exposure_us: 0 #Does not support No Auto white balance
+  
+realsense1:
+  width: 424 #640 #1280
+  height: 240 #480 #720
+  framerate: 60
+  enable_color: true
+  enable_depth: false
+  # align_depth_to_color: false
+  serial_number: "128422271715"
+  manual_exposure_us: 10000
+
+realsense2:
+  width: 424 #640 #1280
+  height: 240 #480 #720
+  framerate: 60
+  enable_color: true
+  enable_depth: false
+  # align_depth_to_color: false
+  serial_number: "127122270237"
+  manual_exposure_us: 3000
+
+admittance_controller0:
+  dt: 0.002
+  log_to_file: false
+  log_file_path: "/tmp/admittance0_controller.log"
+  compliance6d:
+    stiffness: [200, 200, 300, 2, 2, 2] 
+    # damping: [3.1, 3.1, 3.1, 0.1, 0.1, 0.1] # for data collection
+    damping: [10.0, 10.0, 10.0, 0.3, 0.3, 0.3] # for data collection
+    inertia: [0.3, 0.3, 0.3, 0.0015, 0.0015, 0.0015]
+  max_spring_force_magnitude: 50 #TODO: MAA-for teleoperation should be 50?
+  direct_force_control_gains:
+    P_trans: 0.5
+    I_trans: 0
+    D_trans: 0
+    P_rot: 0.5
+    I_rot: 0
+    D_rot: 0
+  direct_force_control_I_limit: [0, 0, 0, 0, 0, 0]

@@ -17,7 +17,7 @@ target_link_libraries(WSG_GRIPPER
 add_executable(wsg_test
     src/test.cpp
 )
-target_link_libraries(wsg_test WSG_GRIPPER ${RUT})
+target_link_libraries(wsg_test WSG_GRIPPER ${RUT} ${YAMLLib})
 
 
 install(DIRECTORY include/

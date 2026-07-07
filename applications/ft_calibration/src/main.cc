@@ -10,6 +10,7 @@
 #include <force_control/admittance_controller.h>
 #include <force_control/config_deserialize.h>
 #include <robotiq_ft_modbus/robotiq_ft_modbus.h>
+#include <Leptrino_ft.h>
 #include <ur_rtde/ur_rtde.h>
 
 Eigen::IOFormat MatlabFmt(Eigen::StreamPrecision, 0, ", ", ";\n", "", "", "[",
@@ -115,21 +116,23 @@ int main() {
                "function to get wrench reading for calibration.\n";
   URRTDE::URRTDEConfig robot_config;
 
-  RobotiqFTModbus::RobotiqFTModbusConfig robotiq_config;
-  ATINetft::ATINetftConfig ati_config;
+  // RobotiqFTModbus::RobotiqFTModbusConfig robotiq_config;
+  // ATINetft::ATINetftConfig ati_config;
+  Leptrinoft::LEPTRINOFTConfig leptrino_config;
   AdmittanceController::AdmittanceControllerConfig admittance_config;
 
   // open file
   const std::string CONFIG_PATH =
-      "/home/xuxm/hardware_interfaces_internal/applications/"
+      "/home/bmv/hardware_interfaces/applications/"
       "ft_calibration/"
       "config/ft_calibration.yaml";
   YAML::Node config{};
   try {
     config = YAML::LoadFile(CONFIG_PATH);
     robot_config.deserialize(config["ur_rtde"]);
-    robotiq_config.deserialize(config["robotiq_ft_modbus"]);
-    ati_config.deserialize(config["ati_netft"]);
+    // robotiq_config.deserialize(config["robotiq_ft_modbus"]);
+    // ati_config.deserialize(config["ati_netft"]);
+    leptrino_config.deserialize(config["leptrino0"]);
     deserialize(config["admittance_controller"], admittance_config);
   } catch (const std::exception& e) {
     std::cerr << "Failed to load the config file: " << e.what() << std::endl;
@@ -151,21 +154,13 @@ int main() {
   controller.init(time0, admittance_config, pose);
 
   // force sensor
-  bool use_ati = config["use_ati"].as<bool>();
-  if (use_ati) {
-    force_sensor_ptr = std::shared_ptr<ATINetft>(new ATINetft);
-    ATINetft* ati_ptr = static_cast<ATINetft*>(force_sensor_ptr.get());
-    if (!ati_ptr->init(time0, ati_config)) {
-      std::cerr << "Failed to initialize ATI Netft. Exiting." << std::endl;
-      return false;
-    }
-  } else {
-    force_sensor_ptr = std::shared_ptr<RobotiqFTModbus>(new RobotiqFTModbus);
-    RobotiqFTModbus* robotiq_ptr =
-        static_cast<RobotiqFTModbus*>(force_sensor_ptr.get());
-    if (!robotiq_ptr->init(time0, robotiq_config)) {
-      std::cerr << "Failed to initialize Robotiq FT Modbus. Exiting."
-                << std::endl;
+  // bool use_ati = config["use_ati"].as<bool>();
+  bool use_leptrino = config["use_leptrino"].as<bool>();
+  if (use_leptrino) {
+    force_sensor_ptr = std::shared_ptr<Leptrinoft>(new Leptrinoft);
+    Leptrinoft* leptrino_ptr = static_cast<Leptrinoft*>(force_sensor_ptr.get());
+    if (!leptrino_ptr->init(time0, leptrino_config)) {
+      std::cerr << "Failed to initialize Leptrinoft. Exiting." << std::endl;
       return false;
     }
   }

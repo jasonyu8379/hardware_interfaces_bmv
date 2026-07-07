@@ -121,23 +121,9 @@ bool ManipServer::initialize(const std::string& config_path) {
         //     return false;
         //   }
         // }
-        else if (_config.camera_selection == CameraSelection::OAK) {
-          OAK::OAKConfig oak_config;
-          try {
-            oak_config.deserialize(config["oak" + std::to_string(id)]);
-          } catch (const std::exception& e) {
-            std::cerr << "Failed to load the OAK config file: " << e.what()
-                      << std::endl;
-            return false;
-          }
-          camera_ptrs.emplace_back(new OAK);
-          OAK* oak_ptr = static_cast<OAK*>(camera_ptrs[id].get());
-          if (!oak_ptr->init(time0, oak_config)) {
-            std::cerr << "Failed to initialize OAK camera for id " << id
-                      << ". Exiting." << std::endl;
-            return false;
-          }
-        } else {
+        // OAK disabled: library not built
+        // else if (_config.camera_selection == CameraSelection::OAK) { ... }
+        else {
           std::cerr << "Invalid camera selection. Exiting." << std::endl;
           return false;
         }
@@ -184,28 +170,34 @@ bool ManipServer::initialize(const std::string& config_path) {
             return false;
           }
           wrench_publish_rate.push_back(robotiq_config.publish_rate);
-        } else if (_config.force_sensing_mode ==
-                   ForceSensingMode::FORCE_MODE_COINFT) {
-          CoinFT::CoinFTConfig coinft_config;
-          try {
-            coinft_config.deserialize(config["coinft" + std::to_string(id)]);
-          } catch (const std::exception& e) {
-            std::cerr << "Failed to load the CoinFT config file: " << e.what()
-                      << std::endl;
-            return false;
-          }
-          force_sensor_ptrs.emplace_back(new CoinFT);
-          CoinFT* coinft_ptr =
-              static_cast<CoinFT*>(force_sensor_ptrs[id].get());
-          if (!coinft_ptr->init(time0, coinft_config)) {
-            std::cerr << "Failed to initialize CoinFT for id " << id
-                      << ". Exiting." << std::endl;
-            return false;
-          }
-          // CoinFT is blocking and don't need a timed loop.
-          // so the loop rate in manipserver can be anything faster than 360hz
-          wrench_publish_rate.push_back(1000);
-        } else {
+        // CoinFT disabled: onnxruntime not installed
+        // } else if (_config.force_sensing_mode ==
+        //            ForceSensingMode::FORCE_MODE_COINFT) {
+        }       
+////////////////////////////////////////////////////MAA//////////////////////////////////////////////////
+      else if (_config.force_sensing_mode ==
+               ForceSensingMode::FORCE_MODE_LEPTRINO) {
+        Leptrinoft::LEPTRINOFTConfig leptrino_config;
+        try {
+          leptrino_config.deserialize(config["leptrino" + std::to_string(id)]);
+        } catch (const std::exception& e) {
+          std::cerr << "Failed to load the Leptrino config file: " << e.what()
+                    << std::endl;
+          return false;
+        }
+
+        force_sensor_ptrs.emplace_back(new Leptrinoft);
+        Leptrinoft* leptrino_ptr =
+            static_cast<Leptrinoft*>(force_sensor_ptrs[id].get());
+        if (!leptrino_ptr->init(time0, leptrino_config)) {
+          std::cerr << "Failed to initialize Leptrino for id " << id
+                    << ". Exiting." << std::endl;
+          return false;
+        }
+        wrench_publish_rate.push_back(leptrino_config.publish_rate);
+      }
+////////////////////////////////////////////////////MAA//////////////////////////////////////////////////
+        else {
           std::cerr << "Invalid force sensing mode. Exiting." << std::endl;
           return false;
         }
@@ -392,8 +384,11 @@ bool ManipServer::initialize(const std::string& config_path) {
   if (_config.run_robot_thread) {
     for (int id : _id_list) {
       _states_robot_thread_ready.push_back(false);
+      _states_rgb_thread_ready.push_back(false); //MAA: camera related
       _states_robot_thread_saving.push_back(false);
+      _states_rgb_thread_saving.push_back(false); //MAA: camera related
       _states_robot_seq_id.push_back(0);
+      _states_rgb_seq_id.push_back(0); //MAA: camera related
 
       _pose_buffers.push_back(RUT::DataBuffer<Eigen::VectorXd>());
       _vel_buffers.push_back(RUT::DataBuffer<Eigen::VectorXd>());
@@ -500,6 +495,17 @@ bool ManipServer::initialize(const std::string& config_path) {
   if (_config.run_key_thread) {
     _key_thread = std::thread(&ManipServer::key_loop, this, std::ref(time0));
   }
+  // JY: Touch init moved to manip_server_multicam.cc under run_teleop_thread
+  // if (_config.run_touch_thread) {
+  //   Touch::TouchConfig touch_config;
+  //   touch_config.deserialize(config["touch"]);
+  //   _touch_ptr = std::make_shared<Touch>();
+  //   if (!_touch_ptr->init(time0, touch_config)) {
+  //     std::cerr << "[ManipServer] Failed to initialize Touch device. Exiting."
+  //               << std::endl;
+  //     return false;
+  //   }
+  // }
 
   // wait for threads to be ready
   std::cout << "[ManipServer] Waiting for threads to be ready.\n";
@@ -650,6 +656,7 @@ const Eigen::MatrixXd ManipServer::get_camera_rgb(int k, int id) {
   } catch (const std::exception& e) {
     std::cerr << "[ManipServer] Failed to get camera rgb: " << e.what()
               << std::endl;
+    return Eigen::MatrixXd{};
   }
 }
 
@@ -661,6 +668,7 @@ const Eigen::MatrixXd ManipServer::get_wrench(int k, int id) {
   } catch (const std::exception& e) {
     std::cerr << "[ManipServer] Failed to get wrench: " << e.what()
               << std::endl;
+    return Eigen::MatrixXd{};
   }
 }
 
@@ -673,6 +681,7 @@ const Eigen::MatrixXd ManipServer::get_wrench_filtered(int k, int id) {
   } catch (const std::exception& e) {
     std::cerr << "[ManipServer] Failed to get filtered wrench: " << e.what()
               << std::endl;
+    return Eigen::MatrixXd{};
   }
 }
 
@@ -685,6 +694,7 @@ const Eigen::MatrixXd ManipServer::get_robot_wrench(int k, int id) {
   } catch (const std::exception& e) {
     std::cerr << "[ManipServer] Failed to get robot wrench: " << e.what()
               << std::endl;
+    return Eigen::MatrixXd{};
   }
 }
 
@@ -695,6 +705,7 @@ const Eigen::MatrixXd ManipServer::get_pose(int k, int id) {
     return _pose_buffers[id].get_last_k(k);
   } catch (const std::exception& e) {
     std::cerr << "[ManipServer] Failed to get pose: " << e.what() << std::endl;
+    return Eigen::MatrixXd{};
   }
 }
 
@@ -705,6 +716,7 @@ const Eigen::MatrixXd ManipServer::get_vel(int k, int id) {
     return _vel_buffers[id].get_last_k(k);
   } catch (const std::exception& e) {
     std::cerr << "[ManipServer] Failed to get vel: " << e.what() << std::endl;
+    return Eigen::MatrixXd{};
   }
 }
 
@@ -715,6 +727,7 @@ const Eigen::MatrixXd ManipServer::get_eoat(int k, int id) {
     return _eoat_buffers[id].get_last_k(k);
   } catch (const std::exception& e) {
     std::cerr << "[ManipServer] Failed to get eoat: " << e.what() << std::endl;
+    return Eigen::MatrixXd{};
   }
 }
 
@@ -822,6 +835,12 @@ void ManipServer::set_stiffness_matrix(const RUT::Matrix6d& stiffness,
                                        int robot_id) {
   std::lock_guard<std::mutex> lock(_controller_mtxs[robot_id]);
   _controllers[robot_id].setStiffnessMatrix(stiffness);
+}
+
+void ManipServer::set_damping_matrix(const RUT::Matrix6d& damping,  // JY
+                                     int robot_id) {
+  std::lock_guard<std::mutex> lock(_controller_mtxs[robot_id]);
+  _controllers[robot_id].setDampingMatrix(damping);
 }
 
 void ManipServer::clear_cmd_buffer() {
