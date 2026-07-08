@@ -726,6 +726,10 @@ void ManipServer::rgb_loop(const RUT::TimePoint& time0, int id) {
         raw = cv::Mat::zeros(oh, ow, CV_8UC3);
         usleep(20 * 1000);  // 20ms, 50hz
       }
+      if (raw.empty()) {  // JY: camera error — skip frame to avoid cv::resize crash on empty mat
+        std::cerr << header << "Empty frame, skipping.\n";
+        continue;
+      }
       _color_mats[id] = raw;
       time_now_ms = timer.toc_ms();
     }

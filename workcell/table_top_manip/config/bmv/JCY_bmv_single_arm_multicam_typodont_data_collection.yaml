@@ -32,7 +32,7 @@ low_damping: [1.0, 1.0, 1.0, 0.1, 0.1, 0.1]
 output_rgb_hw: [224, 224]
 wrench_filter_parameters: [5, 0.002, 5]
 
-cam_count: 1
+cam_count: 3
 ur_rtde0:
   robot_ip: "192.168.137.1"
   rtde_frequency: 500.0
@@ -79,6 +79,26 @@ realsense0:
   # align_depth_to_color: false
   serial_number: "128422271715"
   manual_exposure_us: 10000
+
+realsense1:
+  width: 424 #640 #1280
+  height: 240 #480 #720
+  framerate: 60
+  enable_color: true
+  enable_depth: false
+  # align_depth_to_color: false
+  serial_number: "127122270237"
+  manual_exposure_us: 3000
+
+realsense2:
+  width: 424 #640 #1280
+  height: 240 #480 #720
+  framerate: 60
+  enable_color: true
+  enable_depth: false
+  # align_depth_to_color: false
+  serial_number: "936322071211"
+  manual_exposure_us: 0 #Does not support No Auto white balance
 
 touch:
   device_name: "Default Device"

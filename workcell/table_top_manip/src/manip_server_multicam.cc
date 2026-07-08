@@ -644,14 +644,16 @@ void ManipServer::join_threads() {
 bool ManipServer::is_ready() {
   // MAA: camera readiness check per camera
   if (_config.run_rgb_thread) {
+    bool all_ready = true;  // JY: check all cameras before returning so we can see every stalled camera
     for (int cam_id : _cam_id_list) {
       std::lock_guard<std::mutex> lock(_camera_rgb_buffer_mtxs[cam_id]);
       if (!_camera_rgb_buffers[cam_id].is_full()) {
         std::cout << cam_id << ": Camera RGB buffer not full: size: "
                   << _camera_rgb_buffers[cam_id].size() << std::endl;
-        return false;
+        all_ready = false;
       }
     }
+    if (!all_ready) return false;
   }
 
   for (int id : _id_list) {

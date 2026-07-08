@@ -28,6 +28,7 @@ class Realsense : public CameraInterfaces {
     bool enable_color{true};
     bool enable_depth{true};
     bool align_depth_to_color{false};
+    std::string serial_number{""};  // JY: empty = first available device; set to pin a specific camera
 
     bool deserialize(const YAML::Node& node) {
       try {
@@ -36,7 +37,10 @@ class Realsense : public CameraInterfaces {
         framerate = node["framerate"].as<int>();
         enable_color = node["enable_color"].as<bool>();
         enable_depth = node["enable_depth"].as<bool>();
-        align_depth_to_color = node["align_depth_to_color"].as<bool>();
+        if (node["align_depth_to_color"])  // JY: optional field
+          align_depth_to_color = node["align_depth_to_color"].as<bool>();
+        if (node["serial_number"])  // JY: optional field — pins pipeline to specific device
+          serial_number = node["serial_number"].as<std::string>();
       } catch (const std::exception& e) {
         std::cerr << "Failed to load the config file: " << e.what()
                   << std::endl;
